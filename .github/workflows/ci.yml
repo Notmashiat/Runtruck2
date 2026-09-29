@@ -1,0 +1,89 @@
+# Architecture §32: every pull request runs install → lint → type check → unit
+# tests → integration tests → build. Production deployment must require these.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main, develop]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: runtruck
+          POSTGRES_PASSWORD: runtruck_ci
+          POSTGRES_DB: runtruck_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U runtruck -d runtruck_test"
+          --health-interval 5s --health-timeout 3s --health-retries 20
+      redis:
+        image: redis:8-alpine
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 3s --health-retries 20
+
+    env:
+      NODE_ENV: test
+      # CI-only throwaway credentials for the service containers above.
+      DATABASE_URL: postgres://runtruck:runtruck_ci@localhost:5432/runtruck_test
+      TEST_DATABASE_URL: postgres://runtruck:runtruck_ci@localhost:5432/runtruck_test
+      REDIS_URL: redis://localhost:6379
+      S3_ENDPOINT: http://localhost:9000
+      S3_REGION: us-east-1
+      S3_BUCKET: runtruck-documents
+      S3_ACCESS_KEY_ID: runtruck
+      S3_SECRET_ACCESS_KEY: runtruck_ci_secret
+      S3_FORCE_PATH_STYLE: 'true'
+      API_ORIGIN: http://localhost:4000
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Start object storage (MinIO)
+        run: |
+          docker run -d --name minio -p 9000:9000 \
+            -e MINIO_ROOT_USER=runtruck -e MINIO_ROOT_PASSWORD=runtruck_ci_secret \
+            minio/minio:latest server /data
+          for i in $(seq 1 30); do curl -sf http://localhost:9000/minio/health/ready && break; sleep 1; done
+          docker run --rm --network host --entrypoint /bin/sh minio/mc:latest -c \
+            "mc alias set local http://localhost:9000 runtruck runtruck_ci_secret && mc mb --ignore-existing local/runtruck-documents-test"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Type check
+        run: pnpm typecheck
+
+      - name: Unit tests
+        run: pnpm test
+
+      - name: Integration tests
+        run: pnpm test:integration
+
+      - name: Build
+        run: pnpm build

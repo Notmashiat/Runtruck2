@@ -30,6 +30,16 @@ export const apiEnvSchema = z
     // The web origin allowed to call the API with credentials (CSRF origin check).
     WEB_ORIGIN: z.url().default('http://localhost:3000'),
     SESSION_TTL_HOURS: z.coerce.number().int().positive().default(12),
+    // S3-compatible object storage for documents (architecture §21). The bucket is private.
+    S3_ENDPOINT: z.url().optional(),
+    S3_REGION: z.string().min(1).default('us-east-1'),
+    S3_BUCKET: z.string().min(3),
+    S3_ACCESS_KEY_ID: z.string().min(1),
+    S3_SECRET_ACCESS_KEY: z.string().min(1),
+    S3_FORCE_PATH_STYLE: z
+      .enum(['true', 'false'])
+      .default('false')
+      .transform((v) => v === 'true'),
     // Pins "today" for the demo dataset (Runtruck1 parity: 2026-09-03). Unset = real clock.
     DEMO_TODAY: isoDate.optional(),
     LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug']).default('info'),

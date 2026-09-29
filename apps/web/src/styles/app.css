@@ -1,0 +1,88 @@
+/* Shared by the marketing site and the app shell — the small additions the
+   .dc.html prototypes layered on top of the Industry design system's
+   styles.css. The app's own look lives in shell.css. */
+
+/* Dark mode for the marketing site: the Industry tokens re-tuned for a dark
+   ground. The tonal ramps are inverted (100 is now darkest), so every
+   component keeps its contrast without touching industry.css. The app's own
+   dark tokens live in shell.css. Toggled from Settings › Appearance. */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --color-bg: #0f141c;
+  --color-surface: #171e2a;
+  --color-text: #e6e9ef;
+  --color-accent: #7aa2ff;
+  --color-accent-2: #8fb0d8;
+  --color-divider: color-mix(in srgb, #e6e9ef 16%, transparent);
+
+  --color-neutral-100: #1a2130;
+  --color-neutral-200: #232c3b;
+  --color-neutral-300: #2f3a4b;
+  --color-neutral-400: #4a5568;
+  --color-neutral-500: #6b7687;
+  --color-neutral-600: #8b96a6;
+  --color-neutral-700: #aab4c2;
+  --color-neutral-800: #cbd3dd;
+  --color-neutral-900: #e6e9ef;
+
+  --color-accent-100: #1c2740;
+  --color-accent-200: #22324f;
+  --color-accent-300: #2c4470;
+  --color-accent-400: #4a6a9c;
+  --color-accent-500: #6f8fc0;
+  --color-accent-600: #94b3e0;
+  --color-accent-700: #b8d0f2;
+  --color-accent-800: #d6e6fb;
+  --color-accent-900: #eef6ff;
+
+  --color-accent-2-100: #1c2740;
+  --color-accent-2-200: #22324f;
+  --color-accent-2-300: #2f4566;
+  --color-accent-2-400: #4d6a8f;
+  --color-accent-2-500: #7290b4;
+  --color-accent-2-600: #97b3d3;
+  --color-accent-2-700: #bcd1ea;
+  --color-accent-2-800: #d9e6f6;
+  --color-accent-2-900: #eef6ff;
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.5);
+  --shadow-md: 0 3px 10px rgba(0, 0, 0, 0.55);
+  --shadow-lg: 0 12px 32px rgba(0, 0, 0, 0.65);
+}
+
+html, body, #root { height: 100%; margin: 0; padding: 0; }
+body { background: var(--color-bg); }
+h1, h2, h3, h4, h5, h6 { margin: 0; }
+
+.num {
+  font-family: "Barlow Condensed", system-ui, sans-serif;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+}
+.lbl {
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+a { color: var(--color-accent-700); }
+a:hover { color: var(--color-accent-900); }
+
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-thumb { background: var(--color-neutral-300); }
+
+/* — marketing site — */
+html { scroll-behavior: smooth; }
+body { text-wrap: pretty; }
+.kick {
+  display: block; font-size: 13px; line-height: 12px; letter-spacing: 0.08em;
+  text-transform: uppercase; font-weight: 600; color: var(--color-accent-700);
+  margin-bottom: 12px;
+}
+.rule { height: 1px; border: 0; margin: 0 0 24px; background: var(--color-divider); }
+.disp {
+  font-family: "Barlow Condensed", system-ui, sans-serif;
+  font-weight: 600; text-transform: uppercase; letter-spacing: 0.01em;
+}
+.site a { color: var(--color-accent-700); text-decoration: none; }
+.site a:hover { color: var(--color-accent-900); }

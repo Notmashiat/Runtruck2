@@ -1,0 +1,37 @@
+/* Sign-in screen (docs/01-product-requirements.md D2). The only screen with no
+   Runtruck1 counterpart, so it only lays out shell.css pieces and uses its tokens. */
+
+.rt-login {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 24px 16px;
+  background: var(--ui-bg);
+  color: var(--ui-text);
+  font-family: 'Inter', system-ui, sans-serif;
+}
+
+.rt-login-card {
+  width: 100%;
+  max-width: 380px;
+}
+
+.rt-login-brand {
+  padding: 0;
+  margin-bottom: 20px;
+}
+
+.rt-login-title {
+  margin: 0 0 16px;
+}
+
+.rt-login-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.rt-login-submit {
+  justify-content: center;
+  margin-top: 6px;
+}

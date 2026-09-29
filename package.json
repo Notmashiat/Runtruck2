@@ -1,0 +1,32 @@
+{
+  "name": "runtruck",
+  "private": true,
+  "description": "Runtruck TMS — multi-tenant transportation management system (pnpm + Turborepo monorepo).",
+  "packageManager": "pnpm@10.34.6",
+  "engines": {
+    "node": ">=24.0.0 <25",
+    "pnpm": ">=10"
+  },
+  "scripts": {
+    "build": "turbo run build",
+    "dev": "turbo run dev",
+    "lint": "turbo run lint",
+    "typecheck": "turbo run typecheck",
+    "test": "turbo run test",
+    "test:integration": "turbo run test:integration",
+    "test:e2e": "pnpm --filter @runtruck/e2e test",
+    "db:generate": "pnpm --filter @runtruck/database db:generate",
+    "db:migrate": "pnpm --filter @runtruck/database db:migrate",
+    "db:seed": "pnpm --filter @runtruck/database db:seed",
+    "db:reset": "pnpm --filter @runtruck/database db:reset",
+    "infra:up": "docker compose -f infrastructure/docker/docker-compose.yml up -d",
+    "infra:down": "docker compose -f infrastructure/docker/docker-compose.yml down",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
+  },
+  "devDependencies": {
+    "prettier": "^3.6.0",
+    "turbo": "^2.11.5",
+    "typescript": "~6.0.3"
+  }
+}

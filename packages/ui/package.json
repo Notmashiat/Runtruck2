@@ -1,0 +1,32 @@
+{
+  "name": "@runtruck/ui",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Runtruck design system: the shell stylesheet tokens and presentational React primitives (Card, Kpis, Tag…).",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./styles/*": "./styles/*"
+  },
+  "files": ["dist", "styles"],
+  "sideEffects": ["**/*.css"],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "dev": "tsc -p tsconfig.build.json --watch --preserveWatchOutput",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint ."
+  },
+  "peerDependencies": {
+    "react": "^19.0.0"
+  },
+  "devDependencies": {
+    "@runtruck/eslint-config": "workspace:*",
+    "@types/react": "^19.2.18",
+    "eslint": "^9.39.5",
+    "react": "^19.3.0",
+    "typescript": "~6.0.3"
+  }
+}

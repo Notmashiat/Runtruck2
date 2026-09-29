@@ -1,0 +1,12 @@
+packages:
+  - apps/*
+  - packages/*
+  - tests/*
+
+# Native builds pnpm may run on install (everything else is blocked by default).
+onlyBuiltDependencies:
+  - '@swc/core'
+  - esbuild
+  - msgpackr-extract
+  - sharp
+  - unrs-resolver

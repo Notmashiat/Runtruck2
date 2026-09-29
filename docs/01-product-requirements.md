@@ -80,6 +80,7 @@ Record new conflicts here instead of choosing silently (architecture §49).
 | # | Conflict | Status |
 |---|---|---|
 | C1 | D5 (strict) versus D6 (reproduce quirks). Some Runtruck1 screens dereference the first row of a list unguarded (e.g. Uninvoiced, Past Due). Parity code would crash if strict data made such a list empty. The seed keeps those lists non-empty, so the case cannot arise with demo data. | Accepted as-is. Revisit when real tenants onboard. |
+| C2 | Local object storage. MinIO stopped publishing community Docker images, and `minio/minio` / `minio/mc` no longer pull. Local development and CI use **SeaweedFS 4.48** (Apache-2.0, S3-compatible) instead, with the AWS CLI image creating the buckets. The application only speaks the standard S3 API, so production can use any S3 provider (architecture §25: replaceable providers). | Decided 2026-09-29 (infrastructure only; no stack change). |
 
 ## 7. Not implemented (tracked, never reported as done)
 

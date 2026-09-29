@@ -95,7 +95,7 @@ You may **add** columns or tables when a screen needs them. Do not rename or rem
 - Edit only your own domain's files.
 
 **Documents.**
-- Object storage is S3-compatible: MinIO in docker-compose, bucket `runtruck-documents`.
+- Object storage is S3-compatible: SeaweedFS in docker-compose (MinIO stopped publishing community images), bucket `runtruck-documents`.
 - Metadata lives in `documents` + `document_versions`.
 - Seeded "Attached" documents get metadata rows. The seed also writes a small placeholder object for each, so the metadata is never dangling.
 

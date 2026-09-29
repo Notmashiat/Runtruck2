@@ -20,7 +20,7 @@ describe('parseEnv(apiEnvSchema)', () => {
     expect(env.S3_REGION).toBe('us-east-1');
   });
 
-  it('parses the MinIO settings', () => {
+  it('parses the local S3 (SeaweedFS) settings', () => {
     const env = parseEnv(apiEnvSchema, { ...valid, S3_ENDPOINT: 'http://localhost:9000', S3_FORCE_PATH_STYLE: 'true' });
     expect(env.S3_ENDPOINT).toBe('http://localhost:9000');
     expect(env.S3_FORCE_PATH_STYLE).toBe(true);

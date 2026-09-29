@@ -61,14 +61,15 @@ jobs:
           node-version-file: .nvmrc
           cache: pnpm
 
-      - name: Start object storage (MinIO)
+      - name: Start object storage (SeaweedFS S3)
         run: |
-          docker run -d --name minio -p 9000:9000 \
-            -e MINIO_ROOT_USER=runtruck -e MINIO_ROOT_PASSWORD=runtruck_ci_secret \
-            minio/minio:latest server /data
-          for i in $(seq 1 30); do curl -sf http://localhost:9000/minio/health/ready && break; sleep 1; done
-          docker run --rm --network host --entrypoint /bin/sh minio/mc:latest -c \
-            "mc alias set local http://localhost:9000 runtruck runtruck_ci_secret && mc mb --ignore-existing local/runtruck-documents-test"
+          printf '{"identities":[{"name":"ci","credentials":[{"accessKey":"runtruck","secretKey":"runtruck_ci_secret"}],"actions":["Admin","Read","List","Tagging","Write"]}]}' > /tmp/s3.json
+          docker run -d --name s3 -p 9000:8333 -v /tmp/s3.json:/etc/seaweedfs/s3.json:ro \
+            chrislusf/seaweedfs:4.48 server -dir=/data -ip.bind=0.0.0.0 -s3 -s3.port=8333 -s3.config=/etc/seaweedfs/s3.json
+          for i in $(seq 1 60); do curl -sf http://localhost:9000/healthz && break; sleep 1; done
+          docker run --rm --network host -e AWS_ACCESS_KEY_ID=runtruck -e AWS_SECRET_ACCESS_KEY=runtruck_ci_secret \
+            -e AWS_DEFAULT_REGION=us-east-1 amazon/aws-cli:2.34.0 --endpoint-url http://localhost:9000 \
+            s3api create-bucket --bucket runtruck-documents-test
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile

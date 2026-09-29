@@ -1,0 +1,9 @@
+{
+  "identities": [
+    {
+      "name": "runtruck-dev",
+      "credentials": [{ "accessKey": "runtruck", "secretKey": "runtruck_dev_secret" }],
+      "actions": ["Admin", "Read", "List", "Tagging", "Write"]
+    }
+  ]
+}

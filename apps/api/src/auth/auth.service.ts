@@ -57,20 +57,26 @@ export class AuthService {
       .limit(1);
     if (!membership) throw new AppError('FORBIDDEN', 'NO_ACTIVE_MEMBERSHIP', 'Your account is not a member of an active organization.');
 
-    const session = await this.sessions.create(user.id, membership.organizationId, meta);
+    // Session, last-login stamp and audit row commit together or not at all.
+    const session = await this.db.transaction(async (tx) => {
+      const created = await this.sessions.create(user.id, membership.organizationId, meta, tx);
+      await tx.update(schema.users).set({ lastLoginAt: new Date() }).where(eq(schema.users.id, user.id));
+      await this.audit.record(
+        tx,
+        { organizationId: membership.organizationId, userId: user.id },
+        { action: 'USER_SIGNED_IN', entityType: 'user', entityId: user.id, next: { ipAddress: meta.ipAddress ?? null } },
+      );
+      return created;
+    });
     await this.limiter.reset(emailKey);
-    await this.db.update(schema.users).set({ lastLoginAt: new Date() }).where(eq(schema.users.id, user.id));
-    await this.audit.record(
-      this.db,
-      { organizationId: membership.organizationId, userId: user.id },
-      { action: 'USER_SIGNED_IN', entityType: 'user', entityId: user.id, next: { ipAddress: meta.ipAddress ?? null } },
-    );
 
     return { session, userId: user.id, organizationId: membership.organizationId };
   }
 
   async logout(ctx: AuthContext): Promise<void> {
-    await this.sessions.revoke(ctx.sessionId);
-    await this.audit.record(this.db, ctx, { action: 'USER_SIGNED_OUT', entityType: 'user', entityId: ctx.userId });
+    await this.db.transaction(async (tx) => {
+      await this.sessions.revoke(ctx.sessionId, tx);
+      await this.audit.record(tx, ctx, { action: 'USER_SIGNED_OUT', entityType: 'user', entityId: ctx.userId });
+    });
   }
 }

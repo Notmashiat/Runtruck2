@@ -1,9 +1,11 @@
 'use client';
 
+import type { MeResponse } from '@runtruck/types';
 import { loginSchema } from '@runtruck/validation';
 import { useRouter } from 'next/navigation';
 import { type FormEvent, useState } from 'react';
 import { api, ApiError } from '@/lib/api/client';
+import { homePath } from '@/lib/nav';
 
 export function LoginForm() {
   const router = useRouter();
@@ -23,8 +25,8 @@ export function LoginForm() {
     }
     setPending(true);
     try {
-      await api.post('/auth/login', parsed.data);
-      router.replace('/app/dashboard');
+      const { data: me } = await api.post<MeResponse>('/auth/login', parsed.data);
+      router.replace(homePath(me.permissions));
       router.refresh();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Could not reach Runtruck. Try again.');

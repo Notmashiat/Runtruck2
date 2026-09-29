@@ -43,6 +43,10 @@ export const apiEnvSchema = z
     // Pins "today" for the demo dataset (Runtruck1 parity: 2026-09-03). Unset = real clock.
     DEMO_TODAY: isoDate.optional(),
     LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug']).default('info'),
+    // Which upstream proxies may set X-Forwarded-For (Express "trust proxy").
+    // 'loopback' = only the Next.js server on the same host; set to the load
+    // balancer's address range in deployed environments.
+    TRUST_PROXY: z.string().min(1).default('loopback'),
   })
   .superRefine((env, ctx) => {
     if (env.NODE_ENV === 'production' && env.DEMO_TODAY) {

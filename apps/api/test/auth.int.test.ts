@@ -12,7 +12,7 @@ afterAll(async () => {
 
 describe('authentication', () => {
   it('signs in, sets an httpOnly session cookie and returns the session', async () => {
-    const res = await request(t.app.getHttpServer())
+    const res = await request(t.server)
       .post('/api/v1/auth/login')
       .send({ email: 'Rosa.Medina@SunridgeFreight.com', password: TEST_PASSWORD })
       .expect(200);
@@ -28,7 +28,7 @@ describe('authentication', () => {
   });
 
   it('rejects a wrong password with the same message as an unknown email', async () => {
-    const server = t.app.getHttpServer();
+    const server = t.server;
     const wrong = await request(server).post('/api/v1/auth/login').send({ email: FIXTURE_USERS.admin, password: 'nope' }).expect(401);
     const unknown = await request(server).post('/api/v1/auth/login').send({ email: 'nobody@example.com', password: 'nope' }).expect(401);
     expect(wrong.body.error.code).toBe('INVALID_CREDENTIALS');
@@ -37,13 +37,13 @@ describe('authentication', () => {
   });
 
   it('validates the login body', async () => {
-    const res = await request(t.app.getHttpServer()).post('/api/v1/auth/login').send({ email: 'x' }).expect(400);
+    const res = await request(t.server).post('/api/v1/auth/login').send({ email: 'x' }).expect(400);
     expect(res.body.error.code).toBe('VALIDATION_ERROR');
     expect(res.body.error.issues.map((i: { path: string }) => i.path)).toEqual(['email', 'password']);
   });
 
   it('requires a session for protected routes', async () => {
-    const res = await request(t.app.getHttpServer()).get('/api/v1/me').expect(401);
+    const res = await request(t.server).get('/api/v1/me').expect(401);
     expect(res.body.error.code).toBe('UNAUTHORIZED');
   });
 
@@ -68,7 +68,7 @@ describe('authentication', () => {
   });
 
   it('exposes readiness without leaking details', async () => {
-    const res = await request(t.app.getHttpServer()).get('/api/v1/health').expect(200);
+    const res = await request(t.server).get('/api/v1/health').expect(200);
     expect(res.body.data).toEqual({ status: 'ok', database: 'ok', redis: 'ok' });
     expect(res.headers['x-request-id']).toBeTruthy();
   });

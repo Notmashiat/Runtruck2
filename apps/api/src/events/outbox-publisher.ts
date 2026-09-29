@@ -1,10 +1,13 @@
 import { Logger } from '@nestjs/common';
 import { type Database, schema } from '@runtruck/database';
 import type { Queue } from 'bullmq';
-import { asc, inArray, isNull, sql } from 'drizzle-orm';
+import { and, asc, inArray, isNull, lt, sql } from 'drizzle-orm';
 import type { DomainEventJob } from './domain-events.js';
 
 const BATCH_SIZE = 100;
+// After this many failed publish attempts an event is left for an operator
+// ("dead-lettered"): it stays in the table, unpublished, with its last error.
+export const MAX_PUBLISH_ATTEMPTS = 10;
 
 // Moves committed outbox rows onto the BullMQ queue (architecture §23, §24).
 // Rows are claimed with FOR UPDATE SKIP LOCKED so several workers can run at
@@ -24,7 +27,7 @@ export class OutboxPublisher {
       const rows = await tx
         .select()
         .from(schema.events)
-        .where(isNull(schema.events.publishedAt))
+        .where(and(isNull(schema.events.publishedAt), lt(schema.events.publishAttempts, MAX_PUBLISH_ATTEMPTS)))
         .orderBy(asc(schema.events.occurredAt))
         .limit(BATCH_SIZE)
         .for('update', { skipLocked: true });
@@ -48,7 +51,8 @@ export class OutboxPublisher {
         );
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
-        this.logger.error({ message: 'Failed to publish outbox batch', error: message });
+        const deadLettered = rows.filter((e) => e.publishAttempts + 1 >= MAX_PUBLISH_ATTEMPTS).map((e) => e.id);
+        this.logger.error({ message: 'Failed to publish outbox batch', error: message, deadLettered });
         await tx
           .update(schema.events)
           .set({ publishAttempts: sql`${schema.events.publishAttempts} + 1`, lastError: message.slice(0, 1_000) })

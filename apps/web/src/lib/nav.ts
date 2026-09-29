@@ -57,6 +57,13 @@ export const SECTION_TABS: Partial<Record<ViewKey, SectionTab[]>> = {
   ],
 };
 
+// Where a member lands after signing in: the first section they may open
+// (the dashboard for anyone with dashboard.view — Runtruck1's landing page).
+export function homePath(permissions: readonly string[]): string {
+  const first = NAV.find((n) => permissions.includes(n.permission));
+  return first ? `/app/${first.key}` : '/app/dashboard';
+}
+
 // '/app/fleet/drivers' → { view: 'fleet', tab: 'drivers' }. Route matching is
 // case-insensitive in Runtruck1, so normalise first.
 export function parseAppPath(pathname: string): { view: ViewKey; segments: string[] } {

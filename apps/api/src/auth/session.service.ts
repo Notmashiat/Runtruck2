@@ -1,7 +1,7 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { Inject, Injectable } from '@nestjs/common';
 import type { ApiEnv } from '@runtruck/config';
-import { type Database, schema } from '@runtruck/database';
+import { type Database, type DbExecutor, schema } from '@runtruck/database';
 import { isPermission, type Permission } from '@runtruck/permissions';
 import { and, eq, gt, isNull, lt, or } from 'drizzle-orm';
 import { API_ENV } from '../config/config.module.js';
@@ -16,6 +16,17 @@ export function hashToken(token: string): string {
   return createHash('sha256').update(token).digest('hex');
 }
 
+// Housekeeping run hourly by the worker: drop sessions that expired or were
+// revoked more than a day ago. Returns how many rows were removed.
+export async function purgeStaleSessions(db: DbExecutor, now = new Date()): Promise<number> {
+  const cutoff = new Date(now.getTime() - 86_400_000);
+  const removed = await db
+    .delete(schema.sessions)
+    .where(or(lt(schema.sessions.expiresAt, cutoff), lt(schema.sessions.revokedAt, cutoff)))
+    .returning({ id: schema.sessions.id });
+  return removed.length;
+}
+
 export interface NewSession {
   token: string;
   expiresAt: Date;
@@ -28,11 +39,11 @@ export class SessionService {
     @Inject(API_ENV) private readonly env: ApiEnv,
   ) {}
 
-  async create(userId: string, organizationId: string, meta: { ipAddress?: string; userAgent?: string }): Promise<NewSession> {
+  async create(userId: string, organizationId: string, meta: { ipAddress?: string; userAgent?: string }, db: DbExecutor = this.db): Promise<NewSession> {
     // 256 bits of entropy; only the hash is stored.
     const token = randomBytes(32).toString('base64url');
     const expiresAt = new Date(Date.now() + this.env.SESSION_TTL_HOURS * 3_600_000);
-    await this.db.insert(schema.sessions).values({
+    await db.insert(schema.sessions).values({
       tokenHash: hashToken(token),
       userId,
       organizationId,
@@ -87,14 +98,8 @@ export class SessionService {
     };
   }
 
-  async revoke(sessionId: string): Promise<void> {
-    await this.db.update(schema.sessions).set({ revokedAt: new Date() }).where(eq(schema.sessions.id, sessionId));
-  }
-
-  // Housekeeping: drop sessions that expired or were revoked more than a day ago.
-  async purgeStale(): Promise<void> {
-    const cutoff = new Date(Date.now() - 86_400_000);
-    await this.db.delete(schema.sessions).where(or(lt(schema.sessions.expiresAt, cutoff), lt(schema.sessions.revokedAt, cutoff)));
+  async revoke(sessionId: string, db: DbExecutor = this.db): Promise<void> {
+    await db.update(schema.sessions).set({ revokedAt: new Date() }).where(eq(schema.sessions.id, sessionId));
   }
 
   // Union of the permissions of every role the user holds in this organization.

@@ -17,8 +17,15 @@ describe('permission catalog', () => {
     const owner = DEFAULT_ROLES.find((r) => r.key === 'owner');
     const driver = DEFAULT_ROLES.find((r) => r.key === 'driver');
     expect(owner?.permissions).toEqual(ALL_PERMISSIONS);
-    expect(driver?.permissions).not.toContain('billing.view');
-    expect(driver?.permissions).not.toContain('settlements.view');
+    // loads.view includes rates/margins; drivers get driver-scoped access in Phase 9.
+    for (const p of ['loads.view', 'billing.view', 'settlements.view', 'drivers.view'] as const) expect(driver?.permissions).not.toContain(p);
+  });
+
+  it('admin can do everything except change organization settings', () => {
+    const admin = DEFAULT_ROLES.find((r) => r.key === 'admin');
+    expect(admin?.permissions).toContain('planner.reset');
+    expect(admin?.permissions).toContain('settlements.approve');
+    expect(admin?.permissions).not.toContain('organization.manage');
   });
 
   it('hasPermissions requires all of the listed permissions', () => {

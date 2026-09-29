@@ -1,3 +1,4 @@
+import type { Server } from 'node:http';
 import type { INestApplication } from '@nestjs/common';
 import { createDatabase, type DatabaseHandle } from '@runtruck/database';
 import { FIXTURE_USERS, seedTestFixtures, TEST_PASSWORD, truncateAll, type FixtureOrganizations } from '@runtruck/database/testing';
@@ -28,6 +29,8 @@ function useTestEnvironment(): void {
 
 export interface TestContext {
   app: INestApplication;
+  // The app's HTTP server, typed (Nest returns `any`).
+  server: Server;
   db: DatabaseHandle;
   orgs: FixtureOrganizations;
   // A supertest agent that holds the session cookie of the given fixture user.
@@ -48,14 +51,16 @@ export async function createTestContext(): Promise<TestContext> {
   // Sign-in throttling counters must not leak between test files.
   await app.get<Redis>(REDIS).flushdb();
 
+  const server = app.getHttpServer() as Server;
   const as = async (user: FixtureUser) => {
-    const agent = request.agent(app.getHttpServer());
+    const agent = request.agent(server);
     await agent.post('/api/v1/auth/login').send({ email: FIXTURE_USERS[user], password: TEST_PASSWORD }).expect(200);
     return agent;
   };
 
   return {
     app,
+    server,
     db,
     orgs,
     as,

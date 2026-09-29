@@ -49,8 +49,11 @@ export const DEFAULT_ROLES: readonly RoleDefinition[] = [
   {
     key: 'driver',
     name: 'Driver',
-    description: 'Driver app access to assigned loads (Phase 9).',
-    permissions: ['loads.view', 'documents.view', 'documents.upload'],
+    // loads.view exposes rates and margins, and there is no "assigned loads only"
+    // scoping yet, so drivers get no web permissions until the driver app (Phase 9)
+    // adds driver-scoped endpoints.
+    description: 'Driver app access to assigned loads arrives in Phase 9.',
+    permissions: [],
   },
   {
     key: 'accounting',

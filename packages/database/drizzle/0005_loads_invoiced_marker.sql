@@ -1,0 +1,2 @@
+ALTER TABLE "loads" ADD COLUMN "invoiced_at" timestamp with time zone;--> statement-breakpoint
+CREATE INDEX "loads_org_uninvoiced_idx" ON "loads" USING btree ("organization_id","status") WHERE "loads"."invoiced_at" is null and "loads"."status" in ('needs_pod', 'delivered');

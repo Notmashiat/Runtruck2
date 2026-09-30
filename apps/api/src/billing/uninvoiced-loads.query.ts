@@ -10,13 +10,14 @@ import { toNumber } from '../common/list/list-query.js';
 // rather than re-implement it (docs/api/dashboard.md §3).
 
 // A load (board or archived) in a delivered status that no invoice item references (any
-// invoice status, draft included). `alias` is the SQL alias of the `loads` row: a
+// invoice status, draft included). loads.invoiced_at is that fact, maintained by a trigger
+// on invoice_items (migration 0006), so the check is an index range scan over
+// loads_org_uninvoiced_idx rather than an anti-join over the whole delivery history (01 C86). `alias` is the SQL alias of the `loads` row: a
 // developer-written identifier, never request input (it is inlined, not bound).
 export function uninvoicedLoadPredicate(alias = 'l'): SQL {
   if (!/^[a-z_][a-z0-9_]*$/.test(alias)) throw new Error(`Invalid SQL alias ${alias}`);
   const l = sql.raw(alias);
-  return sql`${l}.status IN ('needs_pod', 'delivered')
-    AND NOT EXISTS (SELECT 1 FROM invoice_items ii WHERE ii.organization_id = ${l}.organization_id AND ii.load_id = ${l}.id)`;
+  return sql`${l}.invoiced_at IS NULL AND ${l}.status IN ('needs_pod', 'delivered')`;
 }
 
 // Stop route label (03 §6.0.3): the facility's market (else city/state), else the stop's own city/state.

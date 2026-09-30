@@ -142,6 +142,11 @@ export const loads = pgTable(
     // Set when the load is closed off the dispatch board (board, planner and
     // "Related load" exclude archived loads).
     archivedAt: timestamp({ withTimezone: true, mode: 'date' }),
+    // When the load first appeared on an invoice (any invoice item references it); null
+    // while uninvoiced. Maintained ONLY by the trigger on invoice_items (migrations 0005-0006), so
+    // it can never drift from the invoice lines; it lets "uninvoiced" be an index range scan
+    // instead of an anti-join over the whole delivery history (03 §6.0.4, 01 C86).
+    invoicedAt: timestamp({ withTimezone: true, mode: 'date' }),
     // Null for seeded rows.
     createdByUserId: uuid().references(() => users.id, { onDelete: 'restrict' }),
     ...timestamps(),
@@ -163,6 +168,11 @@ export const loads = pgTable(
       .on(t.organizationId, t.status)
       .where(sql`${t.archivedAt} is null`),
     index('loads_org_status_idx').on(t.organizationId, t.status),
+    // Uninvoiced loads (03 §6.0.4): delivered, never invoiced. Stays small however long the
+    // delivery history grows, because invoiced loads leave it.
+    index('loads_org_uninvoiced_idx')
+      .on(t.organizationId, t.status)
+      .where(sql`${t.invoicedAt} is null and ${t.status} in ('needs_pod', 'delivered')`),
     index('loads_org_customer_idx').on(t.organizationId, t.customerId),
     index('loads_org_carrier_idx').on(t.organizationId, t.carrierId),
     check('loads_number_ck', sql`${t.loadNumber} > 0`),

@@ -97,8 +97,9 @@ Every value equals Runtruck1's. The Dashboard "Unbilled loads" tile (`11`, `$34,
 
 ```sql
 -- $1 = ctx.organizationId, $2 = today (date)
--- ONE statement per request: the page and the summary read one MATERIALIZED set, so the
--- anti-join below runs once (it still reads every delivered load, 01 C86).
+-- ONE statement per request: the page and the summary read one MATERIALIZED set. The set
+-- starts from the partial index loads_org_uninvoiced_idx (loads.invoiced_at IS NULL,
+-- trigger-maintained; 03 §6.0.4, 01 C86), so its cost follows the uninvoiced loads, not history.
 WITH uninvoiced AS MATERIALIZED (
   SELECT l.id, l.load_number, l.customer_id, cu.name AS customer_name,
          l.line_haul_cents::bigint + l.fuel_surcharge_cents + l.accessorial_cents AS amount_cents,   -- cast before adding (03 §6.0.3)
@@ -123,9 +124,8 @@ WITH uninvoiced AS MATERIALIZED (
     WHERE s.organization_id = l.organization_id AND s.load_id = l.id
     ORDER BY (s.kind = 'delivery') DESC, s.sequence DESC LIMIT 1) dl ON true
   WHERE l.organization_id = $1
+    AND l.invoiced_at IS NULL                     -- no invoice item references it (trigger-maintained)
     AND l.status IN ('needs_pod', 'delivered')
-    AND NOT EXISTS (SELECT 1 FROM invoice_items ii
-                    WHERE ii.organization_id = l.organization_id AND ii.load_id = l.id)
 ), summary AS (SELECT count(*), coalesce(sum(amount_cents), 0), count(DISTINCT customer_id),
                        count(*) FILTER (WHERE NOT pod_attached) FROM uninvoiced),
 oldest AS (SELECT id, load_number, delivered_on FROM uninvoiced

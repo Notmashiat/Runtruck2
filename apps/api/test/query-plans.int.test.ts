@@ -314,7 +314,9 @@ describe('uninvoiced loads (billing.md §3.3, 01 C86)', () => {
     const full = await new UninvoicedLoadsQuery().list(db, demo, '2026-09-03', { limit: 500, offset: 0 });
     expect(statements).toHaveLength(1);
     const plan = await explain(statements[0]!);
-    expect(plan.filter((n) => n['Relation Name'] === 'invoice_items')).toHaveLength(1);
+    // The uninvoiced set comes from loads.invoiced_at (trigger-maintained, migration 0006):
+    // no anti-join over invoice_items at all (01 C86).
+    expect(plan.filter((n) => n['Relation Name'] === 'invoice_items')).toHaveLength(0);
     expect(full.summary.loadCount).toBe(full.rows.length);
 
     // A page past the end still carries the summary.

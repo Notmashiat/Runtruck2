@@ -36,6 +36,20 @@
       "when": 1790756377391,
       "tag": "0004_events_claim_and_ordered_indexes",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1790774759110,
+      "tag": "0005_loads_invoiced_marker",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1790774761808,
+      "tag": "0006_loads_invoiced_marker_trigger",
+      "breakpoints": true
     }
   ]
 }

@@ -3,6 +3,7 @@
 import { usePathname, useRouter } from 'next/navigation';
 import { useState } from 'react';
 import { NewLoadDialog } from '@/components/loads/NewLoadDialog';
+import { useSession } from '@/context/SessionContext';
 import { useShellUi } from '@/context/ShellUiContext';
 import { useUninvoicedCount } from '@/lib/api/billing';
 import { useApproveSettlements } from '@/lib/api/settlements';
@@ -23,6 +24,7 @@ export function Header() {
   const pathname = usePathname();
   const router = useRouter();
   const { query, setQuery } = useShellUi();
+  const { can } = useSession();
   const uninvoiced = useUninvoicedCount();
   const approveSettlements = useApproveSettlements();
   const [newLoadOpen, setNewLoadOpen] = useState(false);
@@ -32,23 +34,27 @@ export function Header() {
   const tab = SECTION_TABS[view] ? segments[3] : undefined;
   const onLoadDetail = view === 'loads' && Boolean(segments[3]);
 
+  // Controls backed by API writes/data are hidden from members who lack the
+  // permission (docs/07-roles-permissions.md §5); Admin sees exactly Runtruck1.
+  const newLoad: HeadAction[] = can('loads.create') ? [{ label: '+ New Load', primary: true, onClick: () => setNewLoadOpen(true) }] : [];
+
   // Keyed by section, or section/tab for the tabbed sections.
   const actionsFor: Record<string, HeadAction[]> = {
-    dashboard: [{ label: '+ New Load', primary: true, onClick: () => setNewLoadOpen(true) }],
-    loads: [{ label: '+ New Load', primary: true, onClick: () => setNewLoadOpen(true) }],
+    dashboard: newLoad,
+    loads: newLoad,
     loadDetail: [{ label: 'Message driver' }, { label: 'Update status', primary: true }],
     'fleet/drivers': [{ label: '+ Add Driver', primary: true }],
     'fleet/trucks': [{ label: 'Log service' }, { label: '+ Add Unit', primary: true }],
     'fleet/trailers': [{ label: '+ Add Trailer', primary: true }],
     crm: [{ label: '+ Add Customer', primary: true }],
-    'accounting/uninvoiced': [
-      { label: `Invoice ${uninvoiced ?? ''} loads`, primary: true, onClick: () => navigate('/app/accounting/invoiced') },
-    ],
+    // Hidden while the count is unknown, so "Invoice  loads" can never render (billing.md §7.1).
+    'accounting/uninvoiced':
+      uninvoiced === undefined ? [] : [{ label: `Invoice ${uninvoiced} loads`, primary: true, onClick: () => navigate('/app/accounting/invoiced') }],
     'accounting/invoiced': [{ label: 'Export batch' }, { label: '+ New Batch', primary: true, onClick: () => navigate('/app/accounting/batches') }],
     'accounting/batches': [{ label: '+ New Batch', primary: true }],
     'accounting/past-due': [{ label: 'Send reminders', primary: true }],
     'accounting/paid': [{ label: 'Export' }],
-    'accounting/payroll': [{ label: 'Run settlements', primary: true, onClick: () => approveSettlements() }],
+    'accounting/payroll': can('settlements.approve') ? [{ label: 'Run settlements', primary: true, onClick: () => approveSettlements() }] : [],
     'accounting/bills': [{ label: '+ Add Bill', primary: true }],
     'hr/employee-contracts': [{ label: '+ New Contract', primary: true }],
     'hr/onboarding': [{ label: '+ Start Onboarding', primary: true }],

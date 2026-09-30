@@ -27,7 +27,11 @@ export function proxy(request: NextRequest): NextResponse {
     return NextResponse.redirect(url);
   }
 
-  return NextResponse.next();
+  // Layouts do not receive the URL; forward it for server-side prefetching
+  // (lib/api/server.ts requestPathname).
+  const forwarded = new Headers(request.headers);
+  forwarded.set('x-runtruck-pathname', normalized);
+  return NextResponse.next({ request: { headers: forwarded } });
 }
 
 export const config = {

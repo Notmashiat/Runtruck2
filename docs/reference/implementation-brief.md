@@ -64,7 +64,18 @@ This brief is binding for everyone implementing a domain group. Read it after [d
   2. **Pending** (a query without prefetched data, e.g. after client navigation): render the page's full structure (tab bar, header, KPI cards, card titles, table head) with KPI values "—" and no notes, no rows, no chart bars and **no** empty-state line. No spinners or skeletons Runtruck1 never had. A refetch keeps the previous data on screen.
   3. **Refused (403)**: exactly as pending. Nothing about the refused data is shown, and no message is added (the sidebar already hides most refused screens; 07 §5, §7).
   4. **Any other error** (400, 404, 5xx, network): the structure of rule 2 plus one `ui-empty` line with the API error `message` (user-safe by 04 §2), in the table card, or in the first card of a page without a table.
-- **Header contracts** (Header.tsx already imports these):
+- **Data loading pattern (use exactly this):**
+  - In `src/lib/api/<domain>.ts` (no `'use client'` directive), declare each read once with `apiQuery(queryKey, path)` from `@/lib/api/query`, using the query keys your API doc specifies. Export the hooks there too: `useApiQuery(def)`, `useMutation` + `invalidate(queryClient, ...prefixes)`.
+  - `src/app/app/<route>/page.tsx` is an async **server** component:
+    1. `const me = await getMe()` (from `@/lib/api/server`);
+    2. pick the query defs the member may read (`me.permissions`);
+    3. `return <Prefetch queries={[...]}><YourClientPage /></Prefetch>` (from `@/lib/api/prefetch`).
+
+    The client page (a `'use client'` component in `src/components/<group>/`) calls `useApiQuery(def)` with the same defs.
+  - The `/app` layout already prefetches `uninvoicedLoadsQuery` above the Header on accounting routes.
+- **View-model builders** live in `packages/calculations/src/view-models/<domain>.ts` (pre-created, already re-exported; **owned by the domain's group**), together with label/tone maps. They are pure functions over DTO types, and the API uses the same builders for server-side `q` (03 §1.11). Rebuild with `pnpm --filter @runtruck/calculations build` after changing them.
+- **Header contracts** (Header.tsx and the /app layout already import these):
+  - `uninvoicedLoadsQuery` (an `apiQuery` def, key `['billing', 'uninvoiced-loads']`, path `/billing/uninvoiced-loads?limit=500`) from `@/lib/api/billing`
   - `useUninvoicedCount(): number | undefined` from `@/lib/api/billing`
   - `useApproveSettlements(): () => void` from `@/lib/api/settlements`
   - `NewLoadDialog({ onClose, onCreated(loadNumber: string) })` from `@/components/loads/NewLoadDialog`, where `loadNumber` is formatted like `L-40223`
@@ -101,3 +112,13 @@ This brief is binding for everyone implementing a domain group. Read it after [d
 - Every deviation from Runtruck1 or from the docs, with the reason.
 - Anything another group must do.
 - Open issues.
+
+## 8. Cross-cutting items assigned to a group
+
+- **C27 compliance warnings (loads group):** `POST /loads` evaluates the assigned driver's compliance (expired CDL or medical card, missing required driver documents, per `driver_documents`) against `clock.today`. It **never blocks**. It records each problem in the `LOAD_CREATED` / `LOAD_ASSIGNED` audit entry's `next.complianceWarnings`, and integration tests assert this for Priya Raman (expired CDL).
+- **Seeded document files (loads group):** the demo seed stores storage keys, sizes and checksums of a placeholder PDF (`PLACEHOLDER_PDF*`, `documentStorageKey` from `@runtruck/database/seed`) but writes no objects.
+  - Add `packages/database/src/seed/storage.ts` exporting `uploadSeedDocuments(db, s3Config)`: it puts the placeholder PDF at every seeded version's key that is missing from the bucket. `@aws-sdk/client-s3` is already a dependency of `@runtruck/database` and `@runtruck/api`.
+  - Call it from `scripts/seed.ts` and `scripts/reset.ts` when `S3_*` env vars are set, from `createTestContext` (test bucket), and from `tests/e2e/global-setup.ts`.
+  - Also export it from `@runtruck/database/seed`.
+  - You own those call sites for this change.
+- **Shared S3 client (loads group):** `apps/api/src/storage/` holds a `StorageService` wrapping `@aws-sdk/client-s3`, built from the validated `S3_*` env, with timeouts per docs/13 §2. Other groups never touch storage.

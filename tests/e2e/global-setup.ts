@@ -1,7 +1,6 @@
 import { createDatabase, runMigrations } from '@runtruck/database';
-import { seedDemo } from '@runtruck/database/seed';
-import { truncateAll } from '@runtruck/database/testing';
 import { sql } from 'drizzle-orm';
+import { resetDemoData } from './demo-data.js';
 import { E2E } from './env.js';
 
 // Before the browser tests: make sure the e2e database exists, bring it to the
@@ -24,9 +23,9 @@ export default async function globalSetup(): Promise<void> {
   const handle = createDatabase(E2E.databaseUrl, { max: 2, applicationName: 'runtruck-e2e-setup' });
   try {
     await runMigrations(handle.db);
-    await truncateAll(handle.db);
-    await seedDemo(handle.db, { password: E2E.password });
   } finally {
     await handle.close();
   }
+  // A fresh demo, with the seeded versions' placeholder PDFs in the e2e bucket.
+  await resetDemoData();
 }

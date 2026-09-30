@@ -14,6 +14,9 @@ export {
   PLACEHOLDER_PDF_SHA256,
 } from './demo/index.js';
 export type { PlannerDefaultSet, PlannerDefaultsResult } from './demo/index.js';
+// The seeded versions' placeholder objects in the documents bucket (docs/13-document-system.md §7).
+export { seedStorageConfigFromEnv, uploadSeedDocuments } from './storage.js';
+export type { SeedStorageConfig, SeedUploadResult } from './storage.js';
 
 // The Runtruck1 demo dataset (docs/01-product-requirements.md §4,
 // docs/03-database.md seed mapping): Sunridge Freight, Rosa Medina (Admin), and

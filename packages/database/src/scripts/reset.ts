@@ -1,7 +1,7 @@
 import { databaseEnvSchema, parseEnv } from '@runtruck/config';
 import { createDatabase } from '../client.js';
 import { runMigrations } from '../migrate.js';
-import { seedDemo } from '../seed/index.js';
+import { seedDemo, seedStorageConfigFromEnv, uploadSeedDocuments } from '../seed/index.js';
 import { truncateAll } from '../testing/index.js';
 
 // pnpm db:reset — DESTRUCTIVE: empties every table in DATABASE_URL, re-applies
@@ -31,6 +31,12 @@ try {
   await truncateAll(handle.db);
   await seedDemo(handle.db, { password });
   console.log('Database reset and demo re-seeded.');
+  // The seeded document versions' placeholder PDFs (docs/13-document-system.md §7), when S3 is configured.
+  const storage = seedStorageConfigFromEnv();
+  if (storage) {
+    const { keys, uploaded } = await uploadSeedDocuments(handle.db, storage);
+    console.log(`Document objects: ${uploaded} uploaded, ${keys - uploaded} already present in ${storage.bucket}.`);
+  }
 } finally {
   await handle.close();
 }

@@ -192,7 +192,7 @@ These are the uninvoiced loads of 03 §6.0.4: loads (board or archived) in a del
 
 ### 2.7 Query plan (no N+1)
 
-The service (`DashboardService.get(ctx)`) runs a **constant number of set-based queries (6)**, whatever the number of loads or drivers. It runs them in **one read-only `REPEATABLE READ` transaction**, so the KPI count, the table and the chart come from the same snapshot. Every query and every join filters on `organization_id = ctx.organizationId`, and joins use the composite tenant keys `(organization_id, id)`.
+The service (`DashboardService.get(ctx)`) runs a **constant number of set-based statements (7)**, whatever the number of loads or drivers. It runs them in **one read-only `REPEATABLE READ` transaction**, so the KPI count, the table and the chart come from the same snapshot. Every query and every join filters on `organization_id = ctx.organizationId`, and joins use the composite tenant keys `(organization_id, id)`.
 
 No query reads the organization's whole history (architecture §37, §38). Stop look-ups are made **per load**, with the loads module's shared helper (§3), as `LEFT JOIN LATERAL (… LIMIT 1)` on `load_stops_load_sequence_uq`, and only for **candidate loads** found through a date index:
 
@@ -209,7 +209,8 @@ LEFT JOIN LATERAL (SELECT s.appointment_date, s.facility_id, s.city, s.state,
 
 | # | query | candidates (exact) | index used |
 |---|---|---|---|
-| 1 | Active table plus count: `SELECT … FROM (SELECT l.*, count(*) OVER () AS active_count FROM loads l WHERE l.organization_id = $org AND l.archived_at IS NULL AND l.status IN (active) ORDER BY l.created_at DESC, l.load_number DESC LIMIT 6) l JOIN customers …` with `fp`/`ld` and their `facilities` for the route labels of those ≤ 6 loads. Zero rows means count 0. | the active board loads | `loads_org_board_idx`, `load_stops_load_sequence_uq` |
+| 1 | Active table plus count: `SELECT … FROM (SELECT l.*, count(*) OVER () AS active_count FROM loads l WHERE l.organization_id = $org AND l.archived_at IS NULL AND l.status IN (active) ORDER BY l.created_at DESC, l.load_number DESC LIMIT 6) l JOIN customers …`. Zero rows means count 0. | the active board loads | `loads_org_board_idx` |
+| 1b | Route labels of those ≤ 6 loads: the loads module's shared `loadEndpoints(db, org, ids)` helper (§3), one statement with `fp`/`ld` and their `facilities`, so each route is byte-identical to `GET /loads` `route`. | the ≤ 6 table loads | `load_stops_load_sequence_uq` |
 | 2 | `lastWeekCount`: `count(*)` over candidates with `fp.appointment_date <= $d AND ld.appointment_date >= $d`. | loads with a stop dated `>= $d` (`SELECT DISTINCT load_id FROM load_stops WHERE organization_id = $org AND appointment_date >= $d`); exact, because the last delivery itself is such a stop | `load_stops_org_date_idx` |
 | 3 | Revenue per day: `SELECT coalesce(ld.completed_on, ld.appointment_date) AS day, sum(revenue(l))::bigint … WHERE l.status IN ('needs_pod','delivered') AND day BETWEEN $prevWeekStart AND $weekEnd GROUP BY day`. The service derives the 7 chart bars, `thisWeekCents` and `previousWeekCents` from these ≤ 14 rows. The chart range always lies inside `[prevWeekStart, weekEnd]`. | loads with a stop dated in `[prevWeekStart, weekEnd]` ∪ loads with a stop completed in `[prevWeekStart − 1 day, weekEnd + 2 days)` read as UTC instants; exact, because delivered_on is the last delivery's completion date in its own timezone (every offset lies within a day of UTC) or, without one, its appointment date | `load_stops_org_date_idx`, `load_stops_org_completed_idx` |
 | 4 | Deadhead: `sum(empty_miles)`, `sum(loaded_miles + empty_miles)` `GROUP BY (fp.appointment_date >= $weekStart)` over candidates with both mile columns set and `fp.appointment_date BETWEEN $prevWeekStart AND $weekEnd` | loads with a stop dated in `[prevWeekStart, weekEnd]`; exact, because the first pickup is such a stop | `load_stops_org_date_idx` |
@@ -220,7 +221,7 @@ Sums are `bigint` in SQL. They are converted to JSON numbers after a safe-intege
 
 ### 2.8 Tenancy and permissions
 
-- The organization, user and timezone come only from the session (`AuthContext`). The endpoint takes no id and no organization input (04 §4, Rule 4). A second organization sees only its own rows: an organization with no loads or drivers gets `activeLoads: []`, seven `0` days, `drivers: []` and a zero/null summary (§4.1).
+- The organization, user and timezone come only from the session (`AuthContext`). The endpoint takes no id and no organization input (04 §4, Rule 4). A second organization sees only its own rows: an organization with no loads or drivers gets `activeLoads: []`, seven `0` days, `drivers: []` and a zero/null summary (§4.1). The "Test Carrier Co" fixture (01 C10) is not empty: it gets its one in-transit load L-50001 ("Dallas, TX → Houston, TX", $1,500), seven `0` days, its one driver, and summary `{1, 0, 1}`, `{0, 0, null}`, `{77, null, null}`, `{0, 0}`.
 - `dashboard.view` covers every figure on the page, including revenue and unbilled totals for roles without `billing.view` (Dispatcher). The design brief §2 decides this, and [07 §7](../07-roles-permissions.md) notes it for review. The page exposes aggregates only. The table rows carry number, customer, route, rate and status; the driver rows carry name, duty status and HOS.
 - Search rows come from `GET /loads`, which enforces `loads.view` itself (§5.6).
 
@@ -243,7 +244,7 @@ None. The endpoint is read-only, writes no `audit_logs` row and emits no domain 
 
 1. **Seed values:** signed in as Rosa (Admin), `GET /dashboard` returns exactly the seed values of §2.4–§2.5. That means 5 table rows in the order shown, the 7 `revenueCents`, the 6 drivers, and summary `{5, 3, 2}`, `{2468000, 1796000, 374}`, `{78, 92, 14}`, `{11, 3490000}`, with `meta.today` `2026-09-03`.
 2. **Created load:** after `POST /loads` (Dispatcher) with a pickup after 2026-08-27, `summary.activeLoads.count` is 6, `deltaVsLastWeek` is 3, and `activeLoads[0].loadNumber` is 40223.
-3. **Tenant isolation:** the "Test Carrier Co" owner gets the empty dashboard of §2.8. No Sunridge row or figure leaks.
+3. **Tenant isolation:** the "Test Carrier Co" owner gets only its own fixture figures of §2.8 (one load, one driver). No Sunridge row or figure leaks, and a load created in Sunridge does not change its dashboard.
 4. **Permissions:** Driver and Maintenance fixture members get 403 `FORBIDDEN`. Dispatcher and Accounting get 200.
 5. **Validation:** `GET /dashboard?q=x` gives 400 `VALIDATION_ERROR`.
 6. **Unit tests** (service helpers): the week bounds for every weekday; half-away-from-zero rounding (for example −0.05 % → −1 tenth); `null` for a previous week with 0 revenue or no deadhead data; negative deltas.

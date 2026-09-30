@@ -24,4 +24,6 @@ export const E2E = {
   // Test-only password given to the seeded demo accounts in the e2e database.
   password: process.env.E2E_PASSWORD ?? 'e2e-password-not-a-secret',
   adminEmail: 'rosa.medina@sunridgefreight.com',
+  // The bucket the e2e servers store documents in, apart from the dev bucket.
+  bucket: 'runtruck-documents-test',
 } as const;

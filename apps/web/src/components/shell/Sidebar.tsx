@@ -23,6 +23,8 @@ export function Sidebar() {
     try {
       await api.post('/auth/logout');
     } finally {
+      // A full page load drops every cached query of the ended session.
+      // eslint-disable-next-line @next/next/no-location-assign-relative-destination
       window.location.assign('/');
     }
   }
@@ -40,7 +42,9 @@ export function Sidebar() {
             key={n.key}
             href={`/app/${n.key}`}
             scroll={false}
-            onClick={() => setQuery('')}
+            onClick={() => {
+              setQuery('');
+            }}
             className={`ui-nav-item${n.key === activeKey ? ' is-active' : ''}`}
           >
             {n.label}
@@ -55,15 +59,29 @@ export function Sidebar() {
             {me.user.title} · {me.organization.name}
           </div>
         </div>
-        <button type="button" className="ui-nav-item" onClick={() => setSettingsOpen(true)}>
+        <button
+          type="button"
+          className="ui-nav-item"
+          onClick={() => {
+            setSettingsOpen(true);
+          }}
+        >
           Settings
         </button>
+        {/* A full page load on purpose: it drops every cached query of the ended session. */}
+        {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
         <a href="/" className="ui-nav-item" onClick={logOut}>
           Log out
         </a>
       </div>
 
-      {settingsOpen && <SettingsDialog onClose={() => setSettingsOpen(false)} />}
+      {settingsOpen && (
+        <SettingsDialog
+          onClose={() => {
+            setSettingsOpen(false);
+          }}
+        />
+      )}
     </aside>
   );
 }

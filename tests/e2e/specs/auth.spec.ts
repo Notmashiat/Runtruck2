@@ -13,7 +13,8 @@ test.describe('sign-in', () => {
     await page.getByLabel('Email').fill('rosa.medina@sunridgefreight.com');
     await page.getByLabel('Password').fill('definitely-wrong');
     await page.getByRole('button', { name: 'Sign in' }).click();
-    await expect(page.getByRole('alert')).toHaveText('Email or password is incorrect.');
+    // Scoped to the form: Next's route announcer is also an (empty) alert region.
+    await expect(page.locator('.rt-login-form').getByRole('alert')).toHaveText('Email or password is incorrect.');
     await expect(page).toHaveURL(/\/login$/);
   });
 

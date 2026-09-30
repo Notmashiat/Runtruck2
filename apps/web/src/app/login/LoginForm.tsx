@@ -3,7 +3,7 @@
 import type { MeResponse } from '@runtruck/types';
 import { loginSchema } from '@runtruck/validation';
 import { useRouter } from 'next/navigation';
-import { type FormEvent, useState } from 'react';
+import { type SyntheticEvent, useState } from 'react';
 import { api, ApiError } from '@/lib/api/client';
 import { homePath } from '@/lib/nav';
 
@@ -14,7 +14,7 @@ export function LoginForm() {
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
 
-  async function submit(e: FormEvent<HTMLFormElement>) {
+  async function submit(e: SyntheticEvent<HTMLFormElement>) {
     e.preventDefault();
     setError(null);
     // Same schema the API enforces; checked here only to save a round trip.
@@ -44,7 +44,9 @@ export function LoginForm() {
           name="email"
           autoComplete="username"
           value={email}
-          onChange={(e) => setEmail(e.target.value)}
+          onChange={(e) => {
+            setEmail(e.target.value);
+          }}
           required
           autoFocus
         />
@@ -57,7 +59,9 @@ export function LoginForm() {
           name="password"
           autoComplete="current-password"
           value={password}
-          onChange={(e) => setPassword(e.target.value)}
+          onChange={(e) => {
+            setPassword(e.target.value);
+          }}
           required
         />
       </label>

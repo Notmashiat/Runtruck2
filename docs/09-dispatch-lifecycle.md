@@ -52,7 +52,7 @@ Assignment happens only in backend services (Rule 5, §19). In this release the 
 |---|---|---|---|
 | D1 | Driver availability: duty status `home_time`, HOS remaining | Tobias Frey (Home time) is selectable | warning in the assign response, then a configurable block |
 | D2 | Driver already on another active load (overlapping stop dates) | Marcus Hale can be put on a second load | warning |
-| D3 | Driver qualification: CDL / medical card expired (`driver_documents`) | Priya Raman, CDL expired 07/2026 | block once compliance data is maintained (safety rule) |
+| D3 | Driver qualification: CDL / medical card expired (`driver_documents`) | Priya Raman, CDL expired 07/2026 | **evaluated now, never blocking** (01 §6 C27): each problem is recorded as a `complianceWarnings` entry of the `LOAD_CREATED` / `LOAD_ASSIGNED` audit record ([api/loads.md §6.4](api/loads.md) item 7); switching to a block is a later product decision |
 | D4 | Truck status `in_shop` / `service_due`; next service passed | T-118 (In shop) is selectable | block `in_shop`, warn `service_due` |
 | D5 | Trailer status `inspection`, trailer already loaded on another live dispatch | FB-12 (Inspection) | warn |
 | D6 | Trailer type vs equipment (reefer equipment needs a reefer trailer) | any trailer with any equipment | warn |
@@ -68,7 +68,7 @@ In the create transaction ([api/loads.md §6.4](api/loads.md)), after the rules 
 - **Own fleet:** `loads.carrier_id` = the organization's own-fleet carrier (null if the organization has none), `driver_pay_cents` = the entered pay (0 → null), `carrier_rate_cents` null. If a driver, truck or trailer is chosen, one `dispatches` row `{driver_id, truck_id, trailer_id, status 'assigned'}`. The web pre-fills the truck from the driver's assigned truck (`trucks.assigned_driver_id`) only if no truck is chosen yet — a client convenience; the server stores what is sent.
 - **Partner carrier:** `loads.carrier_id` = the partner, `carrier_rate_cents`, `carrier_contact_name`, `carrier_phone`; `driver_pay_cents` null. If a driver name, truck # or trailer # is given, one `dispatches` row with the free-text columns.
 - **Status:** §4 of [08](08-load-lifecycle.md).
-- **Audit and events:** `LOAD_CREATED` always; `LOAD_ASSIGNED` (`next: {carrierId, dispatchId, driverId, truckId, trailerId, driverName, truckNumber, trailerNumber}`) when E1 applied; events `LoadCreated`, and `LoadAssigned` `{loadId, dispatchId, carrierId, driverId, truckId, trailerId}` when E1 applied, and `LoadDispatched` `{loadId, loadNumber}` when the status is `dispatched` (payloads as [17 §5](17-event-architecture.md)). A later notification job (architecture §22: LoadAssigned → driver push) subscribes to `LoadAssigned`; none exists in this release.
+- **Audit and events:** `LOAD_CREATED` always; `LOAD_ASSIGNED` (`next: {carrierId, dispatchId, driverId, truckId, trailerId, driverName, truckNumber, trailerNumber}`, plus `complianceWarnings` when an own-fleet driver is assigned, C27) when E1 applied; events `LoadCreated`, and `LoadAssigned` `{loadId, dispatchId, carrierId, driverId, truckId, trailerId}` when E1 applied, and `LoadDispatched` `{loadId, loadNumber}` when the status is `dispatched` (payloads as [17 §5](17-event-architecture.md)). A later notification job (architecture §22: LoadAssigned → driver push) subscribes to `LoadAssigned`; none exists in this release.
 - **Activity:** none for the assignment (Runtruck1's created loads show only "Load created by …" and "Driver instructions: …").
 
 ## 5. Permissions

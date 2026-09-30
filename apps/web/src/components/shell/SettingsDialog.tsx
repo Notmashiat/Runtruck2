@@ -43,7 +43,14 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
       <aside className="ui-dialog-nav">
         <div className="ui-dialog-title">Settings</div>
         {PAGES.map((p) => (
-          <button key={p} type="button" className={`ui-dialog-nav-item${page === p ? ' is-active' : ''}`} onClick={() => setPage(p)}>
+          <button
+            key={p}
+            type="button"
+            className={`ui-dialog-nav-item${page === p ? ' is-active' : ''}`}
+            onClick={() => {
+              setPage(p);
+            }}
+          >
             {p}
           </button>
         ))}

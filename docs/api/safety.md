@@ -53,7 +53,7 @@ The web does not send `q`; it filters the rows it holds with the same rule on th
 
 ### 1.4 Tenancy
 
-Every statement filters `organization_id = ctx.organizationId` on **every** table it reads, and every join also matches `organization_id` on both sides (`drivers.organization_id = violations.organization_id AND drivers.id = violations.driver_id`). The composite tenant foreign keys (03 §1.3) make a cross-tenant reference impossible even if a join condition were missing. No endpoint accepts an organization id. A member of another organization sees only that organization's rows: an empty list and an all-zero summary for "Test Carrier Co".
+Every statement filters `organization_id = ctx.organizationId` on **every** table it reads, and every join also matches `organization_id` on both sides (`drivers.organization_id = violations.organization_id AND drivers.id = violations.driver_id`). The composite tenant foreign keys (03 §1.3) make a cross-tenant reference impossible even if a join condition were missing. No endpoint accepts an organization id. A member of another organization sees only that organization's rows. The "Test Carrier Co" fixture (01 C10) has one row in every table, so its member sees exactly its own rows and a summary over them, never Sunridge's.
 
 ### 1.5 Errors
 
@@ -158,7 +158,7 @@ WHERE w.organization_id = $org
 ORDER BY w.position, w.id;
 ```
 
-Indexes: `work_orders_org_position_idx`, the tenant keys `trucks_org_id_uq`, `trailers_org_id_uq`, `facilities_org_id_uq`. The summary is computed in memory from these rows.
+Indexes: `work_orders_org_position_idx`, the tenant keys `trucks_org_id_uq`, `trailers_org_id_uq`, `facilities_org_id_uq`. This statement carries the page's predicates, `LIMIT`/`OFFSET` and `count(*) OVER ()` (§1.2 statement 1); the summary is the separate SQL aggregate of §1.2 statement 2, never computed from the page.
 
 ## 3. `GET /api/v1/driver-documents`
 
@@ -370,7 +370,7 @@ WHERE v.organization_id = $org
 ORDER BY v.occurred_on DESC, v.id;
 ```
 
-Index: `violations_org_occurred_idx (organization_id, occurred_on DESC)`.
+Index: `violations_org_occurred_idx (organization_id, occurred_on DESC)`. This statement carries the page's predicates, `LIMIT`/`OFFSET` and `count(*) OVER ()` (§1.2 statement 1); the summary is the separate SQL aggregate of §1.2 statement 2.
 
 ## 6. `GET /api/v1/claims`
 
@@ -471,7 +471,7 @@ WHERE c.organization_id = $org
 ORDER BY c.claim_number DESC;
 ```
 
-Index: `claims_org_number_uq (organization_id, claim_number)`, scanned backwards. The summary is computed in memory.
+Index: `claims_org_number_uq (organization_id, claim_number)`, scanned backwards. This statement carries the page's predicates, `LIMIT`/`OFFSET` and `count(*) OVER ()` (§1.2 statement 1); the summary is the separate SQL aggregate of §1.2 statement 2, never computed from the page.
 
 ## 7. Web mapping
 
@@ -655,7 +655,7 @@ Header: "Filters" and "+ New Claim" (primary) stay inert.
   - `status=in_shop` → 2 work orders, `status=expiring` → 4 documents, `status=closed` → 4 violations, `status=settled` → 3 claims, each with an unchanged summary;
   - `limit`/`offset`/`meta.total`; `limit=501`, `offset=-1`, `status=bogus` → 400 `VALIDATION_ERROR` naming the parameter;
   - permissions (existing fixtures, `packages/database/src/testing`): the Dispatcher → 200 on `/work-orders`, `/driver-documents`, `/compliance-reminders`, `/violations` and 403 `FORBIDDEN` on `/claims`; the Accounting and Driver members → 403 on all five; no session → 401;
-  - a "Test Carrier Co" member sees `[]` and a zero summary on each, never Sunridge's rows.
+  - a "Test Carrier Co" member sees only its own fixture rows (01 C10: one per table) and a summary over them on each, never Sunridge's rows.
 - **Unit:** window boundaries (a done order completed exactly `today − 30` counts, the day before does not; a violation on `today − 1 year` is outside, the next day inside; Feb 29 → Feb 28; a paid claim dated Dec 31 of last year is outside YTD); `inShopShops` distinct by facility in row order; claimant label for each kind; `estimate`/`reserved`/`paid` whole-dollar view-model values.
 
 ## 10. Differences from Runtruck1 (D5)
@@ -671,7 +671,7 @@ None. Every Safety and watchlist value computed from the seed equals Runtruck1's
 | S1 | `GET /compliance-reminders` serves only Fleet › Drivers. The Dashboard shows no watchlist. | The design brief §2 row says "Dashboard and Drivers tab", but Runtruck1's `DashboardPage.tsx` never renders `COMPLIANCE`/`WATCHLIST` (only `DriversTab.tsx` does). R1/D6 parity wins, as in [dashboard.md §6](dashboard.md) decision 1. Needs the product owner's confirmation. |
 | S2 | `claims.view` covers the claimant's customer/facility name and the claim's load number; `compliance.view` covers the driver and truck names on documents, reminders and violations; `maintenance.view` covers unit numbers and shop names. | They are fields of Runtruck1's rows; requiring `customers.view`/`locations.view`/`loads.view` would blank cells for Maintenance and Dispatcher members (same reasoning as fleet.md F2). |
 | S3 | Statuses are read as stored; "Overdue", "Expiring (60 d)" and "Expired" count stored statuses, and the only clock-dependent parts are the windows of §1.1 and the note "Renew before {today + 60}". | Design brief §2 and 03 §1.7; the derivation rules of fleet-hr-safety §8.4/§9.3 are not adopted. |
-| S4 | "In shop" note: shops distinct by facility (not by label), in row order. | Two different facilities could share a name and city; Runtruck1's label-distinct rule would merge them. Identical for the seed. |
+| S4 | "In shop" note: shops distinct by facility (not by label), in row order. | Facility names are unique per organization (case-insensitive, `facilities_org_name_uq`, 03 §5), so distinct-by-facility and Runtruck1's distinct-by-label give the same list; keying by facility id keeps the rule independent of labels. Identical for the seed. |
 | S5 | "Paid YTD" filters paid claims by the claim date (`occurred_on`), because no claim payment date is stored (03 §6.9). A claim paid this year for an incident dated last year is excluded. | Keeps D5 without a schema change; a `paid_on` column (and `claims_paid_ck`) is the fix when claim settlement is built (§8). |
 | S6 | Loading, refusal (403) and error states follow implementation-brief §4 (pending and 403: KPI values "—" without notes, table head, no rows, no empty-state line; other errors: one `ui-empty` line with the message). | Reachable (07 §7: Safety is gated by `maintenance.view` only); Runtruck1 has no error UI. One rule for every page, as hr.md H4 and fleet.md F1. |
 | S7 | Compliance and dispatch: Priya Raman's expired CDL and Tobias Frey's missing drug test are served as stored (fleet-hr-safety B7). The loads group applied D6 for this release: `POST /loads` does not refuse such a driver ([09 §3](../09-dispatch-lifecycle.md) rule D3 "block once compliance data is maintained", [loads.md](loads.md) L12). Because this weighs D6 against architecture §19 ("relevant compliance constraints"), it is recorded in 01 §6 as **needing the product owner's confirmation**. | D6 versus architecture §19; must not be resolved silently (§49). |

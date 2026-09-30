@@ -275,7 +275,7 @@ Unknown and other-organization ids get the same answer (tenancy is not revealed)
 4. **`dispatches`:** per [09 §4](../09-dispatch-lifecycle.md) — own fleet with any of driver/truck/trailer, or partner with any of driver name/truck #/trailer #; `status` `assigned`, `assigned_at` = `ClockService.now(org tz)`, `assigned_by_user_id` = `ctx.userId`.
 5. **`documents`:** five `pending` slots, positions 1–5 in `LOAD_DOCUMENT_TYPES` order (03 §5.7.1).
 6. **`load_activity`:** sequence 1 `created` "Load created by {creator full name}"; sequence 2 `driver_instructions` "Driver instructions: {driver_instructions}" when set; both `occurred_at` = `ClockService.now(org tz)`, `actor_user_id` = `ctx.userId`.
-7. **Audit** (`AuditService.record`, `entity_type` `load`, `entity_label` `L-<n>`): `LOAD_CREATED` `next: {loadNumber, status, customerId, billToCustomerId, carrierId, lineHaulCents, fuelSurchargeCents, accessorialCents, stopCount}`; plus `LOAD_ASSIGNED` when S1 applied ([09 §4](../09-dispatch-lifecycle.md)).
+7. **Audit** (`AuditService.record`, `entity_type` `load`, `entity_label` `L-<n>`): `LOAD_CREATED` `next: {loadNumber, status, customerId, billToCustomerId, carrierId, lineHaulCents, fuelSurchargeCents, accessorialCents, stopCount}`; plus `LOAD_ASSIGNED` when S1 applied ([09 §4](../09-dispatch-lifecycle.md)). When an own-fleet driver is assigned, both entries' `next` also carry `complianceWarnings` (01 §6 C27): one `{driverId, documentType, problem: 'expired' | 'missing', expiresOn, message}` per problem in the driver's file evaluated against `ClockService.today` — a CDL or medical card that is absent, undated or dated before today, and any other `driver_documents` row recorded as missing (e.g. Priya Raman → `{documentType: 'cdl', problem: 'expired', expiresOn: '2026-07-31', message: 'CDL expired on 2026-07-31.'}`; an empty array when the file is clean). It never blocks the create.
 8. **Events** (`EventsService.emit`): `LoadCreated` `{loadId, loadNumber, status}`; `LoadAssigned` `{loadId, dispatchId, carrierId, driverId, truckId, trailerId}` when S1 applied; `LoadDispatched` `{loadId, loadNumber}` when the status is `dispatched`.
 
 ### 6.5 Errors
@@ -393,6 +393,7 @@ Checks against the seed (gaps §5 #29): "sunridge" matches 7 of 8 loads; "PO 88"
 2. If it counts: `GET /loads/by-number/${n}`.
 3. If it did not count, or the answer is 404 `LOAD_NOT_FOUND`, or `data.archivedAt !== null`: show the **first board load** (Runtruck1 `loads[0]`): `GET /loads?view=all&limit=1`, then `GET /loads/${rows[0].id}`. The URL is left as typed. If the board is empty, the page renders nothing inside `.ui-main` (Runtruck1 would crash; 01 §6 C1).
 4. A 403 is shown as the app's standard refusal (not a fallback).
+5. The server page resolves steps 1–3 before the first paint (implementation-brief §4 rule 1): it reads `by-number`, and on a malformed segment, a 404 or an archived load it also reads the first board load, hydrating each answer under the same query keys, so the fallback renders without a loading state and nothing is requested twice.
 
 #### 8.2.2 Screen values
 
@@ -519,4 +520,4 @@ The draft keeps Runtruck1's string fields; the body is built only for validation
 3. **Dashboard group:** fetch the "Active loads" table from `GET /loads` (§8.4) or reproduce §3's order and matching exactly.
 4. **`docs/01-product-requirements.md` §6:** **done** — L1–L15 and the dispatch/document decisions are recorded (C8 → resolved by L1).
 5. **`docs/17-event-architecture.md`:** **done** — `LoadCreated`, `LoadAssigned`, `LoadDispatched`, `LoadStatusChanged`, `DocumentUploaded`, `PODUploaded` are registered with this document's payloads (17 §5); the specified-only load events are listed there.
-6. **`apps/api/package.json`:** `@aws-sdk/client-s3` (dependency) and `@types/multer` (dev) when the documents module is built ([13 §2](../13-document-system.md)); `packages/database/package.json` needs `@aws-sdk/client-s3` too, for the seed's placeholder objects ([13 §7](../13-document-system.md): not written yet).
+6. **`apps/api/package.json`, `packages/database/package.json`:** **done** — `@aws-sdk/client-s3` and `@types/multer` are present; the seed's placeholder objects are written ([13 §7](../13-document-system.md)).

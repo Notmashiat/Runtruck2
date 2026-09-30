@@ -171,9 +171,9 @@ No handler consumes `SettlementApproved` yet ([18](../18-background-jobs.md)); h
 
 ## 4. Tests this domain must have ([20](../20-testing.md) §3)
 
-- `GET /settlements` (no period) → the five seed rows in order, the §2.3 summary; `?periodStart=2026-09-01` → the same; `?periodStart=2026-02-30` → 400; another organization's session → `data: []` for the same period.
+- `GET /settlements` (no period) → the five seed rows in order, the §2.3 summary; `?periodStart=2026-09-01` → the same; `?periodStart=2026-02-30` → 400; the Test Carrier Co session → only its own settlement for the same period (01 C10 gives it one: Terry Wheeler, $495.00, ready), and `data: []` for a period only Sunridge has (`2026-08-18`).
 - `POST /settlements/approve {periodStart: '2026-09-01'}` as Rosa → 200, three rows `approved`, Ellis `on_hold` and Ana `paid` unchanged, 3 audit + 3 event rows with the caller's organization; repeat → 200, `approvedNow 0`, no new rows.
-- Dispatcher fixture → 403 and nothing written; body with `organizationId` → 400; unknown period or the Test Carrier Co session → 404 `SETTLEMENT_PERIOD_NOT_FOUND`; foreign `Origin` → 403 `CROSS_ORIGIN_REJECTED`.
+- Dispatcher fixture → 403 and nothing written; body with `organizationId` → 400; an unknown period, or the Test Carrier Co session approving a period only Sunridge has (`2026-08-18`) → 404 `SETTLEMENT_PERIOD_NOT_FOUND` with the same message, and Sunridge's row stays `ready` with no audit or event rows; the Test Carrier Co session approving `2026-09-01` moves only its own settlement (Sunridge's rows, audit and events untouched); foreign `Origin` → 403 `CROSS_ORIGIN_REJECTED`.
 - E2E: Payroll "Approve all" flips the three chips to "Approved" and the state survives a reload (20 §4 workflow 4).
 
 ---

@@ -1,5 +1,6 @@
 import type { ApiErrorBody, ApiSuccess, MeResponse } from '@runtruck/types';
 import { cookies, headers } from 'next/headers';
+import { cache } from 'react';
 
 const API_ORIGIN = process.env.API_ORIGIN ?? 'http://localhost:4000';
 const SESSION_COOKIE = 'rt_session';
@@ -17,8 +18,12 @@ export class ServerApiError extends Error {
 }
 
 // GET from the API on the server with the visitor's session cookie. The API
-// decides validity and permissions, never the web server.
-export async function serverGet<T, M extends object = Record<string, never>>(path: string): Promise<ApiSuccess<T, M>> {
+// decides validity and permissions, never the web server. Memoized per server
+// request (React cache), so a read the /app layout and the page both prefetch
+// (e.g. the uninvoiced loads on Accounting › Uninvoiced) and `/me` are sent once.
+export const serverGet = cache(async function serverGet<T, M extends object = Record<string, never>>(
+  path: string,
+): Promise<ApiSuccess<T, M>> {
   const store = await cookies();
   const session = store.get(SESSION_COOKIE);
   const res = await fetch(`${API_ORIGIN}/api/v1${path}`, {
@@ -31,7 +36,7 @@ export async function serverGet<T, M extends object = Record<string, never>>(pat
     throw new ServerApiError(res.status, error?.code ?? 'INTERNAL_ERROR', error?.message ?? `HTTP ${res.status}`);
   }
   return body as ApiSuccess<T, M>;
-}
+});
 
 // Server-side session check for protected layouts. Returns null when there is
 // no valid session.

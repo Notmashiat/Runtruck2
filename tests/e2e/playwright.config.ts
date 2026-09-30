@@ -12,7 +12,7 @@ const serverEnv = {
   API_PORT: String(E2E.apiPort),
   WEB_ORIGIN: E2E.webOrigin,
   API_ORIGIN: `http://localhost:${E2E.apiPort}`,
-  S3_BUCKET: 'runtruck-documents-test',
+  S3_BUCKET: E2E.bucket,
 } as Record<string, string>;
 
 export default defineConfig({
@@ -35,7 +35,10 @@ export default defineConfig({
   webServer: [
     {
       command: 'pnpm --filter @runtruck/api start',
-      url: `http://localhost:${E2E.apiPort}/api/v1/health`,
+      // Playwright starts the web servers BEFORE globalSetup, which creates and migrates
+      // the e2e database. So wait for the port, not /health (which needs that database);
+      // the pool connects lazily, and globalSetup fails loudly if PostgreSQL is down.
+      port: E2E.apiPort,
       env: serverEnv,
       reuseExistingServer: false,
       timeout: 120_000,

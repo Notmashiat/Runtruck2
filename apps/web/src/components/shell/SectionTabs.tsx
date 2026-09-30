@@ -27,7 +27,9 @@ export function SectionTabs() {
             key={t.key}
             href={href}
             scroll={false}
-            onClick={() => setQuery('')}
+            onClick={() => {
+              setQuery('');
+            }}
             aria-current={active ? 'page' : undefined}
             className={`ui-tab${active ? ' is-active' : ''}`}
           >

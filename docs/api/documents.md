@@ -78,7 +78,7 @@ The load detail (`GET /loads/by-number/:loadNumber`, `GET /loads/:id`) embeds th
 | 502 | `DEPENDENCY_UNAVAILABLE` | object storage failed or timed out (13 §2 limits); nothing was recorded |
 
 - **Tenancy:** the organization comes from the session only; the slot and version rows carry `ctx.organizationId`; the composite FKs make a cross-tenant slot impossible; the object key is built from the caller's organization id, the load id found in that organization and the server-generated version id, never from input.
-- **Implementation notes:** Nest `FileInterceptor('file', { storage: memoryStorage(), limits: { fileSize: LOAD_DOCUMENT_MAX_BYTES, files: 1, fields: 1, fieldSize: 1024 } })` (multer ships with `@nestjs/platform-express`; `@types/multer` is a dev dependency to add); the controller maps multer's limit errors to the codes above.
+- **Implementation notes:** Nest `FileInterceptor('file', { limits: { fileSize: LOAD_DOCUMENT_MAX_BYTES, files: 1, fields: 1, fieldSize: 1024, parts: 2 }, defParamCharset: 'utf8' })`. Without `dest` or `storage`, multer keeps the file in memory (never on disk), so `apps/api` needs no direct `multer` dependency (it ships with `@nestjs/platform-express`; `@types/multer` is a dev dependency); `defParamCharset` keeps UTF-8 file names intact. `UploadErrorsInterceptor` maps multer's errors: a file over the limit → `DOCUMENT_FILE_TOO_LARGE`; an extra file or field, a file part not named `file` or a malformed body → `VALIDATION_ERROR` (issue at `file`).
 
 ## 4. `GET /loads/:id/documents/:documentId/file` — download (contract only)
 

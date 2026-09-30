@@ -14,6 +14,10 @@ import { serverGet } from './server';
 // no request is sent that the API would refuse.
 export async function Prefetch({ queries, children }: { queries: ApiQueryDef<unknown, object>[]; children: ReactNode }) {
   const queryClient = new QueryClient();
-  await Promise.all(queries.map((q) => queryClient.prefetchQuery({ queryKey: q.queryKey, queryFn: () => serverGet(q.path) })));
+  // A failed read is swallowed: it is not dehydrated, and the client shows the
+  // pending/error state for it (brief §4 rules 2-4).
+  await Promise.all(
+    queries.map((q) => queryClient.query({ queryKey: q.queryKey, queryFn: () => serverGet(q.path) }).catch(() => undefined)),
+  );
   return <HydrationBoundary state={dehydrate(queryClient)}>{children}</HydrationBoundary>;
 }

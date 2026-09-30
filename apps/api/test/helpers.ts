@@ -1,6 +1,7 @@
 import type { Server } from 'node:http';
 import type { INestApplication } from '@nestjs/common';
 import { createDatabase, type DatabaseHandle } from '@runtruck/database';
+import { seedStorageConfigFromEnv, uploadSeedDocuments } from '@runtruck/database/seed';
 import { FIXTURE_USERS, seedTestFixtures, TEST_PASSWORD, truncateAll, type FixtureOrganizations } from '@runtruck/database/testing';
 import type { Redis } from 'ioredis';
 import request from 'supertest';
@@ -45,6 +46,9 @@ export async function createTestContext(): Promise<TestContext> {
   const db = createDatabase(process.env.DATABASE_URL ?? '', { max: 4, applicationName: 'runtruck-test' });
   await truncateAll(db.db);
   const orgs = await seedTestFixtures(db.db);
+  // The seeded versions' placeholder PDFs in the test bucket (docs/13-document-system.md §7).
+  const storage = seedStorageConfigFromEnv();
+  if (storage) await uploadSeedDocuments(db.db, storage);
 
   const app = await createApp(false);
   await app.init();

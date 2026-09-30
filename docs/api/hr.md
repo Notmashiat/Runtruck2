@@ -47,7 +47,7 @@ The web does not send `q`; it filters the rows it holds with the same rule on th
 
 ### 1.4 Tenancy
 
-Every statement filters `organization_id = ctx.organizationId` on **every** table it reads, and every join also matches `organization_id` on both sides (`employees.organization_id = employee_contracts.organization_id AND employees.id = employee_contracts.employee_id`). The composite tenant foreign keys (03 §1.3) make a cross-tenant reference impossible even if a join condition were missing. No endpoint accepts an organization id. A member of another organization sees only that organization's rows: an empty list and an all-zero summary for "Test Carrier Co".
+Every statement filters `organization_id = ctx.organizationId` on **every** table it reads, and every join also matches `organization_id` on both sides (`employees.organization_id = employee_contracts.organization_id AND employees.id = employee_contracts.employee_id`). The composite tenant foreign keys (03 §1.3) make a cross-tenant reference impossible even if a join condition were missing. No endpoint accepts an organization id. A member of another organization sees only that organization's rows. The "Test Carrier Co" fixture (01 C10) has one row in every table, so its member sees exactly its own rows and a summary over them, never Sunridge's.
 
 ### 1.5 Errors
 
@@ -376,7 +376,7 @@ Header: "Filters" and "+ Start Onboarding" (primary) stay inert.
   - `status=renewal_due` → 2 rows with an unchanged summary; `stage=complete` → Evan Brooks;
   - `limit`/`offset`/`meta.total`; `limit=0`, `limit=501`, `status=bogus` → 400 `VALIDATION_ERROR` naming the parameter;
   - the Dispatcher, Accounting and Driver fixture members (no `hr.view`) → 403 `FORBIDDEN`; no session → 401;
-  - a "Test Carrier Co" member sees `[]` and a zero summary (`renewalsDue: []`, `awaitingDocuments: []`), never Sunridge's rows.
+  - a "Test Carrier Co" member sees only its own fixture rows (01 C10: one contract, one onboarding case) and a summary over them, never Sunridge's rows.
 - **Unit:** org-week and quarter boundaries (a case started on the Sunday counts, the Monday after does not; `completed_on` = quarter start counts, the day before does not); the renewals order (`renews_on` then position); `firstPendingLabel` ignores `received` requests; `formatPayBasis` for the four bases.
 
 ## 7. Differences from Runtruck1 (D5)

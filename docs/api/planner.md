@@ -414,7 +414,7 @@ The page ports Runtruck1's `PlannerPage`, `EventDialog`, `CalendarSettings`, `li
 | page mount | `GET /planner/stop-values` | `['planner', 'stop-values']` |
 | EventDialog opens, only when `can('planner.manage', 'loads.view')` | `GET /planner/related-loads` | `['planner', 'related-loads']` |
 
-The grid renders only once the events, codes and prefs are ready (prefs are read from `localStorage` after hydration, port spec §14.3), so Runtruck1's initial-scroll effect fires once with the final `firstStart` (scrollTop 0 for the default week, 100 for Day Sep 3). Queries refetch on focus: the calendar is shared, so other members' changes appear.
+The first paint has the calendar (implementation-brief §4 rule 1, which governs every ported page): the server prefetches the events of the default range, the codes and the stop values, and renders the grid with the default view settings. Saved prefs are read from `localStorage` only after hydration (port spec §14.3) and applied at once; Runtruck1's initial-scroll effect depends on `firstStart`, so it runs again with the final value (scrollTop 0 for the default week, 100 for Day Sep 3). Default settings are written to `localStorage` only when the member changes something. Queries refetch on focus: the calendar is shared, so other members' changes appear.
 
 ### 7.2 View model: DTO → Runtruck1 `PlannerEvent`
 

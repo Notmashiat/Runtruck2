@@ -1,7 +1,7 @@
 import { databaseEnvSchema, parseEnv } from '@runtruck/config';
 import { createDatabase } from '../client.js';
 import { findOrganizationByCompanyNumber } from '../seed/access.js';
-import { DEMO_COMPANY_NUMBER, seedDemo } from '../seed/index.js';
+import { DEMO_COMPANY_NUMBER, seedDemo, seedStorageConfigFromEnv, uploadSeedDocuments } from '../seed/index.js';
 
 // pnpm db:seed — loads the Runtruck1 demo dataset into DATABASE_URL.
 // Development only (architecture §33): refuses production and never overwrites.
@@ -24,6 +24,12 @@ try {
   } else {
     const { organizationId } = await seedDemo(handle.db, { password });
     console.log(`Seeded Sunridge Freight (${organizationId}). Sign in as rosa.medina@sunridgefreight.com with SEED_DEMO_PASSWORD.`);
+  }
+  // The seeded document versions' placeholder PDFs (docs/13-document-system.md §7), when S3 is configured.
+  const storage = seedStorageConfigFromEnv();
+  if (storage) {
+    const { keys, uploaded } = await uploadSeedDocuments(handle.db, storage);
+    console.log(`Document objects: ${uploaded} uploaded, ${keys - uploaded} already present in ${storage.bucket}.`);
   }
 } finally {
   await handle.close();

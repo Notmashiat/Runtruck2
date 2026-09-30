@@ -33,7 +33,9 @@ async function request<T, M extends object>(method: Method, path: string, body?:
 
   const error = (json as Partial<ApiErrorBody> | null)?.error;
   if (res.status === 401 && typeof window !== 'undefined' && !path.startsWith('/auth/')) {
-    // Session expired or revoked: back to sign-in.
+    // Session expired or revoked: back to sign-in with a full page load, which
+    // drops every cached query of the old session.
+    // eslint-disable-next-line @next/next/no-location-assign-relative-destination
     window.location.assign('/login');
   }
   throw new ApiError(res.status, error?.code ?? 'INTERNAL_ERROR', error?.message ?? 'Something went wrong.', error?.requestId, error?.issues ?? []);

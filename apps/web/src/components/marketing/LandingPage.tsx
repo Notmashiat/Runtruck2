@@ -61,7 +61,7 @@ export function LandingPage() {
           RunTruck
         </span>
         <a href="#platform">Platform</a>
-        <a href="#who">Who it's for</a>
+        <a href="#who">Who it&apos;s for</a>
         <a href="#pricing">Pricing</a>
         <a href="#faq">FAQ</a>
         <Link className="btn btn-secondary" href="/app/dashboard">Log in</Link>

@@ -16,7 +16,13 @@ function required(name: string): string {
 const devUrl = new URL(process.env.E2E_DATABASE_URL ?? required('DATABASE_URL'));
 if (!process.env.E2E_DATABASE_URL) devUrl.pathname = '/runtruck_e2e';
 
+// E2E uses its own Redis database index (sign-in throttling counters, queues), so
+// repeated runs never trip the dev environment's limits or read its keys.
+const redisUrl = new URL(process.env.REDIS_URL ?? 'redis://localhost:6379');
+redisUrl.pathname = '/10';
+
 export const E2E = {
+  redisUrl: redisUrl.toString(),
   databaseUrl: devUrl.toString(),
   apiPort: 4000,
   webPort: 3000,

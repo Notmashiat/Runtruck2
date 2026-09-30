@@ -16,6 +16,7 @@
     "@types/node": "^24.0.0",
     "drizzle-orm": "^0.45.3",
     "eslint": "^9.39.5",
+    "ioredis": "^6.0.0",
     "typescript": "~6.0.3"
   }
 }

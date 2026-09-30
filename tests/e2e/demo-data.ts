@@ -2,6 +2,7 @@ import { createDatabase } from '@runtruck/database';
 import { seedDemo, seedStorageConfigFromEnv, uploadSeedDocuments } from '@runtruck/database/seed';
 import { truncateAll } from '@runtruck/database/testing';
 import { sql } from 'drizzle-orm';
+import { Redis } from 'ioredis';
 import { E2E } from './env.js';
 
 // Loads a fresh copy of the demo (docs/01 §4) into the e2e database and puts the seeded
@@ -18,6 +19,13 @@ export async function resetDemoData(): Promise<void> {
     if (storage) await uploadSeedDocuments(handle.db, { ...storage, bucket: E2E.bucket });
   } finally {
     await handle.close();
+  }
+  // Fresh throttling counters and queues in the e2e Redis index.
+  const redis = new Redis(E2E.redisUrl, { maxRetriesPerRequest: 1 });
+  try {
+    await redis.flushdb();
+  } finally {
+    redis.disconnect();
   }
 }
 

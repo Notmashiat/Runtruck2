@@ -368,6 +368,9 @@ importers:
       eslint:
         specifier: ^9.39.5
         version: 9.39.5
+      ioredis:
+        specifier: ^6.0.0
+        version: 6.0.0
       typescript:
         specifier: ~6.0.3
         version: 6.0.3

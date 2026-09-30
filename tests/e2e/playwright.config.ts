@@ -13,6 +13,7 @@ const serverEnv = {
   WEB_ORIGIN: E2E.webOrigin,
   API_ORIGIN: `http://localhost:${E2E.apiPort}`,
   S3_BUCKET: E2E.bucket,
+  REDIS_URL: E2E.redisUrl,
 } as Record<string, string>;
 
 export default defineConfig({

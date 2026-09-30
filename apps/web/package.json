@@ -1,0 +1,37 @@
+{
+  "name": "@runtruck/web",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Runtruck web app — Next.js App Router (architecture §5).",
+  "type": "module",
+  "scripts": {
+    "dev": "next dev --port 3000",
+    "build": "next build",
+    "start": "next start --port 3000",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint .",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@runtruck/calculations": "workspace:*",
+    "@runtruck/permissions": "workspace:*",
+    "@runtruck/types": "workspace:*",
+    "@runtruck/ui": "workspace:*",
+    "@runtruck/validation": "workspace:*",
+    "@tanstack/react-query": "^5.104.0",
+    "next": "^16.3.7",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@runtruck/eslint-config": "workspace:*",
+    "@types/node": "^24.0.0",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.7",
+    "eslint": "^9.39.5",
+    "eslint-config-next": "^16.3.7",
+    "typescript": "~6.0.3",
+    "vitest": "^5.0.2"
+  }
+}

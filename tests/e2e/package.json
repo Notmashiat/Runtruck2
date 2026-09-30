@@ -1,0 +1,22 @@
+{
+  "name": "@runtruck/e2e",
+  "version": "0.0.0",
+  "private": true,
+  "description": "End-to-end tests of real user workflows through the browser (architecture §31). Run `pnpm build` first.",
+  "type": "module",
+  "scripts": {
+    "test:e2e": "playwright test",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint ."
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.63.0",
+    "@runtruck/database": "workspace:*",
+    "@runtruck/eslint-config": "workspace:*",
+    "@types/node": "^24.0.0",
+    "drizzle-orm": "^0.45.3",
+    "eslint": "^9.39.5",
+    "ioredis": "^6.0.0",
+    "typescript": "~6.0.3"
+  }
+}

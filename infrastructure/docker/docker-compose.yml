@@ -1,0 +1,77 @@
+# Local development infrastructure (architecture §3, §24, §28): PostgreSQL is the
+# source of truth, Redis backs BullMQ queues and rate limiting. Development only —
+# these credentials are throwaway local values, never staging/production ones (§33, §34).
+name: runtruck
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: runtruck
+      POSTGRES_PASSWORD: runtruck_dev
+      POSTGRES_DB: runtruck
+    ports:
+      - '127.0.0.1:5432:5432'
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./postgres-init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U runtruck -d runtruck']
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:8-alpine
+    restart: unless-stopped
+    command: ['redis-server', '--appendonly', 'yes']
+    ports:
+      - '127.0.0.1:6379:6379'
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  # S3-compatible object storage for load documents (architecture §21), dev/CI
+  # only. SeaweedFS (Apache-2.0) replaces MinIO, which stopped publishing
+  # community images. The app speaks plain S3, so any provider works elsewhere.
+  s3:
+    image: chrislusf/seaweedfs:4.48
+    restart: unless-stopped
+    command: ['server', '-dir=/data', '-ip.bind=0.0.0.0', '-s3', '-s3.port=8333', '-s3.config=/etc/seaweedfs/s3.json']
+    ports:
+      - '127.0.0.1:9000:8333'
+    volumes:
+      - s3-data:/data
+      - ./seaweedfs/s3.json:/etc/seaweedfs/s3.json:ro
+    healthcheck:
+      test: ['CMD-SHELL', 'wget -q -O /dev/null http://127.0.0.1:8333/healthz || exit 1']
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  # One-shot: creates the private documents buckets (dev + test), then exits.
+  s3-init:
+    image: amazon/aws-cli:2.34.0
+    depends_on:
+      s3:
+        condition: service_healthy
+    environment:
+      AWS_ACCESS_KEY_ID: runtruck
+      AWS_SECRET_ACCESS_KEY: runtruck_dev_secret
+      AWS_DEFAULT_REGION: us-east-1
+    entrypoint: ['/bin/sh', '-c']
+    command:
+      - >
+        for b in runtruck-documents runtruck-documents-test; do
+        aws --endpoint-url http://s3:8333 s3api head-bucket --bucket $$b 2>/dev/null ||
+        aws --endpoint-url http://s3:8333 s3api create-bucket --bucket $$b; done
+
+volumes:
+  postgres-data:
+  redis-data:
+  s3-data:

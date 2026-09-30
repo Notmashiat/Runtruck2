@@ -1,0 +1,33 @@
+{
+  "name": "@runtruck/calculations",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Pure business calculations and display formatters. The API runs the calculations authoritatively; the web app only formats (architecture §5).",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "dev": "tsc -p tsconfig.build.json --watch --preserveWatchOutput",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint .",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@runtruck/eslint-config": "workspace:*",
+    "@types/node": "^24.0.0",
+    "eslint": "^9.39.5",
+    "typescript": "~6.0.3",
+    "vitest": "^5.0.2"
+  },
+  "dependencies": {
+    "@runtruck/types": "workspace:*"
+  }
+}

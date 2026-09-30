@@ -1,0 +1,15 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": ".",
+    "types": ["node"],
+    "experimentalDecorators": true,
+    "emitDecoratorMetadata": true,
+    // Nest injects by the runtime class referenced in constructor signatures, so
+    // imports used only as types in decorated positions must stay value imports.
+    "verbatimModuleSyntax": false,
+    "declaration": false,
+    "declarationMap": false
+  },
+  "include": ["src", "test", "*.config.ts"]
+}

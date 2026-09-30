@@ -59,7 +59,7 @@ Browser ──POST /api/v1/auth/login {email, password}──▶ Next.js (rewrit
   6  unknown user | wrong password | user disabled
                                              → 401 INVALID_CREDENTIALS
   7  first active membership (oldest)        → 403 NO_ACTIVE_MEMBERSHIP
-  8  INSERT sessions; reset the email counter; users.last_login_at = now()
+  8  INSERT sessions; reset the email counter, release one IP hit; users.last_login_at = now()
   9  audit USER_SIGNED_IN {ipAddress}
  10  Set-Cookie rt_session=…; body = MeResponse (same as GET /me)
 ```
@@ -75,16 +75,18 @@ Details:
   | `rl:login:email:<normalized email>` | 10 attempts  | 15 minutes |
   | `rl:login:ip:<req.ip>`              | 100 attempts | 15 minutes |
 
-  Every attempt that passes validation counts, before the credentials are checked. Attempt 11 for an email inside the window is refused with `429 RATE_LIMITED` "Too many sign-in attempts. Try again in 15 minutes.". A successful sign-in resets the email counter, not the IP counter. `req.ip` comes from `X-Forwarded-For` with one trusted hop (`app.set('trust proxy', 1)` in `create-app.ts`). If Redis is down, sign-in fails closed with `500 INTERNAL_ERROR`.
+  Every attempt that passes validation counts, before the credentials are checked, so parallel guesses cannot overshoot a limit. Attempt 11 for an email inside the window is refused with `429 RATE_LIMITED` "Too many sign-in attempts. Try again in 15 minutes.". A successful sign-in resets the email counter and **takes its own hit back from the IP counter** (`RateLimiterService.release`, never below zero): only failed attempts use up an address's budget, so members behind one address cannot lock each other out by signing in (01 C80). If Redis is down, sign-in fails closed with `500 INTERNAL_ERROR`.
+
+- **Client IP (`req.ip`).** Express derives it from `X-Forwarded-For` through the hops `TRUST_PROXY` trusts (`app.set('trust proxy', env.TRUST_PROXY)` in `create-app.ts`). `@runtruck/config` parses the variable into what Express expects: digits are a hop count (`"1"`), `false` trusts nothing, anything else is a comma-separated list of addresses, subnets or `loopback`/`linklocal`/`uniquelocal`; `true` and malformed entries are refused at boot. Unset, it is `loopback` in development and test; staging and production must set it. The Next.js rewrite forwards the browser's `X-Forwarded-For` **exactly as received and never adds its peer**, so the web tier cannot vouch for the client IP: the API must trust exactly the web-tier hop, and an edge proxy in front of the web tier must set `X-Forwarded-For` from its peer address ([21 §2](21-deployment.md)). The rightmost entry is then the edge's view of the client. `req.ip` keys the IP counter and is stored in `sessions.ip_address` and the `USER_SIGNED_IN` audit row. In local development there is no edge: a request without the header counts against the loopback address shared by every browser, and a client-sent header is believed ([19](19-security.md) G4).
 
 - **Response.** The body is `{ data: MeResponse, meta: {} }`, exactly what `GET /me` returns (§5).
 - **An earlier session is not revoked** when the same browser signs in again. It stays valid until it expires.
 
 ## 3. Sign-out: `POST /api/v1/auth/logout` (`@AuthenticatedOnly`)
 
-- It sets `revoked_at` on the **current** session only, audits `USER_SIGNED_OUT` and clears the cookie (same attributes as when it was set). It returns `{ data: null, meta: {} }`.
+- It sets `revoked_at` on the **current** session only, audits `USER_SIGNED_OUT`, clears the cookie (same attributes as when it was set) and sends `Clear-Site-Data: "cache"`, so the browser drops what it cached for the origin while the member was signed in (01 C82; API responses themselves are `Cache-Control: no-store`, [04 §1](04-api.md)). It returns `{ data: null, meta: {} }`.
 - There is no "sign out everywhere".
-- The web keeps Runtruck1's "Log out" markup (`<a class="ui-nav-item" href="/">`). The click calls the endpoint, then navigates to `/` whether the call succeeded or not (`components/shell/Sidebar.tsx`).
+- The web keeps Runtruck1's "Log out" markup (`<a class="ui-nav-item" href="/">`) and fails closed (`components/shell/Sidebar.tsx`, [01 C78](01-product-requirements.md)). The click calls the endpoint and navigates to `/` only when it succeeded or answered 401 (the session had already ended). On any other failure (network error, the Next proxy's 502, a 5xx) the member stays on the page, still signed in, and a confirm offers **OK** to try again or **Cancel** to sign out of this browser only. Cancel posts to the web origin's `POST /sign-out` (`app/sign-out/route.ts`), which expires the `rt_session` cookie with the attributes of §1 and, like the endpoint, sends `Clear-Site-Data: "cache"` (same-origin requests only, by `Sec-Fetch-Site` or `Origin`); the server session is then left to expire. If that also fails, an alert says the member is still signed in and the page stays. `GET /sign-out` goes to `/` like any unknown path.
 - If the session had already expired, the call returns 401 and the stale cookie stays in the browser. It is harmless, because every protected page re-checks the session with the API (§7).
 
 ## 4. Membership selection
@@ -120,7 +122,7 @@ The browser only ever talks to the web origin. `next.config.ts` rewrites `/api/v
 
 | Layer                                   | What it does                                                                                                                                                                                                                                    | Authority            |
 | --------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------- |
-| `apps/web/src/proxy.ts` (Next 16 proxy) | Lower-cases the static path segments (Runtruck1's case-insensitive routes). It then does an **optimistic redirect**: a request for `/app` or `/app/*` without an `rt_session` cookie goes to `/login`. It only checks that the cookie _exists_. | None: UX only        |
+| `apps/web/src/proxy.ts` (Next 16 proxy) | Routes on the lower-cased static path segments with a rewrite (Runtruck1's case-insensitive routes; the address bar keeps the URL as typed, trailing slash included, as in Runtruck1). It then does an **optimistic redirect**: a request for `/app` or `/app/*` without an `rt_session` cookie goes to `/login`. It only checks that the cookie _exists_. It also sets each page's Content-Security-Policy with a fresh nonce ([19 §2](19-security.md), 01 C79). | None: UX only        |
 | `app/app/layout.tsx` (server component) | Calls `getMe()`, which forwards the cookie to `API_ORIGIN/api/v1/me` with `cache: 'no-store'`. On 401 it redirects to `/login` **before any HTML of the app is sent**. Any other non-OK status throws and shows the error page.                 | Delegates to the API |
 | `app/login/page.tsx`                    | If `getMe()` already succeeds, it redirects to `/app/dashboard`.                                                                                                                                                                                | Delegates to the API |
 | `app/login/LoginForm.tsx`               | Validates with the same `loginSchema` to save a round trip. It posts to `/auth/login`, then `router.replace('/app/dashboard')`. It shows the API's `error.message` as it arrives.                                                               | None                 |

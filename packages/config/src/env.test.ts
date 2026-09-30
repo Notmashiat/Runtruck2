@@ -44,4 +44,28 @@ describe('parseEnv(apiEnvSchema)', () => {
   it('refuses DEMO_TODAY in production', () => {
     expect(() => parseEnv(apiEnvSchema, { ...valid, NODE_ENV: 'production', DEMO_TODAY: '2026-09-03' })).toThrow(/DEMO_TODAY/);
   });
+
+  it('parses TRUST_PROXY into what Express expects (hop count, false or addresses)', () => {
+    expect(parseEnv(apiEnvSchema, valid).TRUST_PROXY).toEqual(['loopback']);
+    expect(parseEnv(apiEnvSchema, { ...valid, TRUST_PROXY: '1' }).TRUST_PROXY).toBe(1);
+    expect(parseEnv(apiEnvSchema, { ...valid, TRUST_PROXY: '2' }).TRUST_PROXY).toBe(2);
+    expect(parseEnv(apiEnvSchema, { ...valid, TRUST_PROXY: 'false' }).TRUST_PROXY).toBe(false);
+    expect(parseEnv(apiEnvSchema, { ...valid, TRUST_PROXY: 'loopback, 10.0.0.0/8,fd00::/8, 192.168.0.0/255.255.0.0' }).TRUST_PROXY).toEqual(
+      ['loopback', '10.0.0.0/8', 'fd00::/8', '192.168.0.0/255.255.0.0'],
+    );
+  });
+
+  it('requires TRUST_PROXY in staging and production, where no default is safe', () => {
+    expect(() => parseEnv(apiEnvSchema, { ...valid, NODE_ENV: 'production' })).toThrow(/TRUST_PROXY/);
+    expect(() => parseEnv(apiEnvSchema, { ...valid, NODE_ENV: 'staging' })).toThrow(/TRUST_PROXY/);
+    expect(parseEnv(apiEnvSchema, { ...valid, NODE_ENV: 'production', TRUST_PROXY: '10.0.1.0/24' }).TRUST_PROXY).toEqual(['10.0.1.0/24']);
+    expect(parseEnv(apiEnvSchema, { ...valid, NODE_ENV: 'test' }).TRUST_PROXY).toEqual(['loopback']);
+  });
+
+  it('refuses TRUST_PROXY=true and malformed addresses', () => {
+    expect(() => parseEnv(apiEnvSchema, { ...valid, TRUST_PROXY: 'true' })).toThrow(/TRUST_PROXY/);
+    expect(() => parseEnv(apiEnvSchema, { ...valid, TRUST_PROXY: 'lb.internal' })).toThrow(/TRUST_PROXY/);
+    expect(() => parseEnv(apiEnvSchema, { ...valid, TRUST_PROXY: '10.0.0.0/33' })).toThrow(/TRUST_PROXY/);
+    expect(() => parseEnv(apiEnvSchema, { ...valid, TRUST_PROXY: '' })).toThrow(/TRUST_PROXY/);
+  });
 });

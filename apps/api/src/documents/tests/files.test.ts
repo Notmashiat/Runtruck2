@@ -59,6 +59,40 @@ describe('detectDocumentMimeType (13 §4.2)', () => {
     expect(detectDocumentMimeType(ftyp('isom', ['mp41']))).toBeNull();
     expect(detectDocumentMimeType(Buffer.alloc(0))).toBeNull();
   });
+
+  it('reads brands only inside a well-formed ftyp box, and never scans a forged box size', () => {
+    // Declared size 0xFFFFFFFF on a 25 MiB upload: refused at once instead of walking every offset.
+    const huge = Buffer.alloc(25 * 1024 * 1024, 0x41);
+    huge.writeUInt32BE(0xffffffff, 0);
+    huge.write('ftypisom', 4, 'latin1');
+    huge.write('heic', huge.length - 4, 'latin1');
+    const started = performance.now();
+    expect(detectDocumentMimeType(huge)).toBeNull();
+    expect(performance.now() - started).toBeLessThan(50);
+
+    // A brand after the box end does not count, even when the declared size is plausible.
+    const pastEnd = ftyp('isom', ['mp41']);
+    pastEnd.write('heic', 20, 'latin1');
+    expect(pastEnd.readUInt32BE(0)).toBe(20);
+    expect(detectDocumentMimeType(pastEnd)).toBeNull();
+
+    // Box sizes below the minimum header, above the cap or beyond the file are refused.
+    const tooSmall = ftyp('heic');
+    tooSmall.writeUInt32BE(12, 0);
+    expect(detectDocumentMimeType(tooSmall)).toBeNull();
+    const beyondFile = ftyp('heic');
+    beyondFile.writeUInt32BE(beyondFile.length + 1, 0);
+    expect(detectDocumentMimeType(beyondFile)).toBeNull();
+    const overCap = Buffer.alloc(8192);
+    overCap.writeUInt32BE(4100, 0);
+    overCap.write('ftypheic', 4, 'latin1');
+    expect(detectDocumentMimeType(overCap)).toBeNull();
+    const atCap = Buffer.alloc(8192);
+    atCap.writeUInt32BE(4096, 0);
+    atCap.write('ftypisom', 4, 'latin1');
+    atCap.write('avif', 4092, 'latin1');
+    expect(detectDocumentMimeType(atCap)).toBe('image/avif');
+  });
 });
 
 describe('sanitizeFileName (13 §4.3)', () => {

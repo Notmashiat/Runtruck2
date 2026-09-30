@@ -50,6 +50,8 @@ export const invoices = pgTable(
     tenantFk('invoices_customer_fk', t.organizationId, t.customerId, customers).onDelete('restrict'),
     uniqueIndex('invoices_org_number_uq').on(t.organizationId, t.invoiceNumber),
     index('invoices_org_status_issued_idx').on(t.organizationId, t.status, t.issuedOn),
+    // Invoices issued in a date range, any status (CRM YTD candidates, customers.md §2.7).
+    index('invoices_org_issued_idx').on(t.organizationId, t.issuedOn),
     index('invoices_org_customer_idx').on(t.organizationId, t.customerId),
     check('invoices_number_ck', sql`${t.invoiceNumber} > 0`),
     check('invoices_issued_ck', sql`(${t.status} = 'draft') = (${t.issuedOn} is null)`),

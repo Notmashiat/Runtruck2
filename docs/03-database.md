@@ -252,6 +252,7 @@ Architecture §23. Written in the business transaction; a worker publishes to Bu
 | `published_at` | `timestamptz` | null | | |
 | `publish_attempts` | `bigint` | not null | `0` | |
 | `last_error` | `text` | null | | |
+| `claimed_until` | `timestamptz` | null | | the outbox publisher's lease (migration `0004`): a publisher claims up to 100 due rows by setting it to `now() + 60 s` in one statement, enqueues outside any transaction, then clears it with the result; other publishers skip a row until the lease ends ([17 §2](17-event-architecture.md)) |
 
 Indexes: `events_unpublished_idx (occurred_at) WHERE published_at IS NULL`, `events_org_aggregate_idx (organization_id, aggregate_type, aggregate_id)`.
 
@@ -696,7 +697,7 @@ The load: board rows, the detail page, New Load writes, and the history behind b
 
 - FKs: `loads_customer_fk (organization_id, customer_id) → customers`, `loads_bill_to_customer_fk (organization_id, bill_to_customer_id) → customers`, `loads_carrier_fk (organization_id, carrier_id) → carriers`, all ON DELETE RESTRICT.
 - Unique: `loads_org_number_uq (organization_id, load_number)`.
-- Indexes: partial `loads_org_board_idx (organization_id, created_at DESC) WHERE archived_at IS NULL`; `loads_org_status_idx (organization_id, status)`; `loads_org_customer_idx (organization_id, customer_id)`; `loads_org_carrier_idx (organization_id, carrier_id)`.
+- Indexes: partial `loads_org_board_idx (organization_id, created_at DESC, load_number DESC) WHERE archived_at IS NULL`, exactly the board order (`DESC` is `NULLS FIRST`, as in the lists' `ORDER BY`; until migration `0004` it was built `NULLS LAST` and could never supply the order), so a board page is an index range scan that stops at `OFFSET + LIMIT`; partial `loads_org_board_status_idx (organization_id, status) WHERE archived_at IS NULL` (the board status counts of `GET /loads`, index-only); `loads_org_status_idx (organization_id, status)`; `loads_org_customer_idx (organization_id, customer_id)`; `loads_org_carrier_idx (organization_id, carrier_id)`.
 - CHECK `loads_number_ck`: `load_number > 0`.
 - CHECK `loads_money_ck`: `line_haul_cents >= 0 and fuel_surcharge_cents >= 0 and accessorial_cents >= 0 and (declared_value_cents is null or declared_value_cents >= 0) and (operating_cost_cents is null or operating_cost_cents >= 0)`.
 - CHECK `loads_total_ck`: `line_haul_cents::bigint + fuel_surcharge_cents + accessorial_cents <= 2147483647` (migration `0003`). Each money column is an `integer`, so without it revenue(l) (§6.0.3) could exceed the `integer` range; New Load refuses such a total ("Total to customer is too large.", docs/api/loads.md §6.1).
@@ -788,6 +789,7 @@ The load detail "Activity" card. The message is rendered when the row is written
 
 - FK: `load_activity_load_fk (organization_id, load_id) → loads` ON DELETE CASCADE.
 - Unique: `load_activity_load_sequence_uq (organization_id, load_id, sequence)`.
+- Index: partial `load_activity_org_load_created_idx (organization_id, load_id, sequence) WHERE kind = 'created'` (a board row's `created` instant in one probe, migration `0004`).
 - Message per kind (Runtruck1 wording): `created` "Load created by {actor full name}" · `driver_instructions` "Driver instructions: {loads.driver_instructions}" · `driver_accepted` "Driver accepted the load in the app" · `arrived` "Arrived at {pickup facility_name}" · `document_uploaded` "Bill of lading uploaded from the cab" · `invoice_queued` "Invoice queued for billing" · `consignee_notified` "Dispatch notified the consignee".
 
 ### 5.7 Documents (`documents.ts`)
@@ -865,7 +867,7 @@ Accounting › Invoiced, Past Due and Paid; CRM AR balances; AR aging.
 
 - FK: `invoices_customer_fk (organization_id, customer_id) → customers` ON DELETE RESTRICT.
 - Unique: `invoices_org_number_uq (organization_id, invoice_number)`.
-- Indexes: `invoices_org_status_issued_idx (organization_id, status, issued_on)`, `invoices_org_customer_idx (organization_id, customer_id)`.
+- Indexes: `invoices_org_status_issued_idx (organization_id, status, issued_on)`, `invoices_org_issued_idx (organization_id, issued_on)` (invoices issued in a date range whatever their status: the CRM year-to-date candidates, migration `0004`), `invoices_org_customer_idx (organization_id, customer_id)`.
 - CHECK `invoices_number_ck`: `invoice_number > 0`.
 - CHECK `invoices_issued_ck`: `(status = 'draft') = (issued_on is null)`.
 - CHECK `invoices_due_ck`: `(issued_on is null) = (due_on is null) and (due_on is null or due_on >= issued_on)`.
@@ -1108,7 +1110,7 @@ Safety › Violations: roadside inspection findings.
 | `status` | `violation_status` | not null | | stored lifecycle status |
 
 - FKs: `violations_driver_fk (organization_id, driver_id) → drivers` and `violations_truck_fk (organization_id, truck_id) → trucks`, ON DELETE RESTRICT.
-- Index: `violations_org_occurred_idx (organization_id, occurred_on DESC)`.
+- Index: `violations_org_occurred_idx (organization_id, occurred_on DESC, id)`, exactly the list order `occurred_on DESC, id` (`DESC` = `NULLS FIRST`; built `NULLS LAST` before migration `0004`).
 - CHECK `violations_points_ck`: `severity_points >= 0`.
 - Labels: `status` open "Open" (A) · contested "Contested" (B) · closed "Closed" (G).
 
@@ -1161,6 +1163,7 @@ What each calendar color means (Customize › Color codes, the legend, EventDial
 - Unique: `planner_color_codes_org_key_uq (organization_id, key)`.
 - Index: `planner_color_codes_org_position_idx (organization_id, position)`.
 - Deleting an unlocked code (`planner.configure`) is one transaction: move its events to the first other unlocked code by `position` (refused when it is the last unlocked code), delete the code, audit. Deleting a locked code is refused.
+- Every writer of an organization's code **set** (add, delete, Reset) first takes the transaction-scoped advisory lock `pg_advisory_xact_lock(hashtextextended('planner_color_codes:' || organization_id, 0))`, then reads the codes `FOR UPDATE` in a new statement. Row locks alone cannot serialize adds under READ COMMITTED (a waiting `FOR UPDATE` never sees rows inserted concurrently), so without the set lock two adds could share a `position` and tone and exceed the 100-code limit ([api/planner.md §3.6](api/planner.md)).
 - Labels: `tone` values are Runtruck1's `TONES` in order: amber, green, red, purple, blue, teal, pink, orange, indigo, slate.
 
 #### 5.12.2 `planner_events`
@@ -1261,7 +1264,7 @@ Runtruck1 shows some figures that no ordinary record could produce. Each is back
 
 A load (board or archived) is **uninvoiced** when its status is a delivered status and no `invoice_items` row references it (an item on an invoice of any status, draft included, counts). Its POD is **attached** when a `documents` row of type `proof_of_delivery` with status `attached` exists for it.
 
-Verified against the seed (design brief §2): exactly Runtruck1's 11 rows. The delivered-status board loads L-40214 (INV-8841), L-40212 (INV-8840) and L-40210 (INV-8836) and the 12 invoice-only archived loads (§7.14) all have an item; L-40218 is in transit (its draft INV-8845 does not matter). No `billing_status` column is needed.
+Verified against the seed (design brief §2): exactly Runtruck1's 11 rows. The delivered-status board loads L-40214 (INV-8841), L-40212 (INV-8840) and L-40210 (INV-8836) and the 12 invoice-only archived loads (§7.14) all have an item; L-40218 is in transit (its draft INV-8845 does not matter). No `billing_status` column is needed. Cost: `delivered` is terminal, so the anti-join reads every delivered load the organization ever had; an indexed marker (e.g. `loads.invoiced_at`) would let the query start from the small uninvoiced set, but that contradicts this rule and is an open decision ([01 C86](01-product-requirements.md)).
 
 #### 6.0.5 Stop labels
 
@@ -2168,6 +2171,7 @@ Migrations live in `packages/database/drizzle/` and are applied in order by `run
 | `0001_audit_append_only.sql` | hand-written (`--custom`) | the `audit_logs` append-only trigger (§9.2) |
 | `0002_tenant_leading_child_indexes.sql` | generated | `0000_init` had created the per-parent unique indexes of `onboarding_document_requests`, `load_activity`, `load_stops`, `document_versions`, `invoice_items` and `settlement_items` without `organization_id`, plus a separate `(organization_id, parent_id)` index each; the schema code declares them as `(organization_id, <parent>_id, <sequence, position or version_number>)`. This migration drops the six old unique and six redundant indexes and creates the organization-leading ones (§1.3). No data change. |
 | `0003_review_hardening.sql` | generated | enum `planner_default_set` and `organizations.planner_defaults` (default `standard`, §2.1); CHECK `loads_total_ck` (§5.6.1); partial index `load_stops_org_completed_idx` (§5.6.2); CHECK `planner_events_span_ck` (§5.12.2). Existing rows satisfy both CHECKs; existing organizations become `standard` (a database seeded before `0003` needs `pnpm db:reset` so Sunridge Freight gets `runtruck1_demo` and the digits-only MC/DOT of §7.1). |
+| `0004_events_claim_and_ordered_indexes.sql` | generated | `events.claimed_until` (the outbox lease, §2.11); `loads_org_board_idx` and `violations_org_occurred_idx` rebuilt in their lists' order (`created_at DESC, load_number DESC` and `occurred_on DESC, id`, `NULLS FIRST`; the `0000` versions were `NULLS LAST`); new `loads_org_board_status_idx`, `load_activity_org_load_created_idx`, `invoices_org_issued_idx` (§5.6, §5.8, §5.11.4). Additive; no data change. |
 
 Rules:
 1. A schema change is made in this document first, then in `packages/database/src/schema/<domain>.ts`, then generated: `pnpm --filter @runtruck/database build`, then `cd packages/database && pnpm exec drizzle-kit generate --name <change>` (drizzle-kit reads the compiled schema, `drizzle.config.ts`).

@@ -7,6 +7,7 @@ import { DOMAIN_EVENTS_QUEUE, type DomainEventJob } from './events/domain-events
 import { dispatchEvent, EventLogHandler, type DomainEventHandler } from './events/event-handlers.js';
 import { OutboxPublisher } from './events/outbox-publisher.js';
 import { purgeStaleSessions } from './auth/session.service.js';
+import { IDLE_IN_TRANSACTION_TIMEOUT_MS } from './database/database.module.js';
 
 // Background worker process (architecture §24): publishes the event outbox to
 // BullMQ and consumes domain events. Runs separately from the HTTP API so each
@@ -18,10 +19,17 @@ const logger = new ConsoleLogger('runtruck-worker', {
   json: env.NODE_ENV !== 'development',
   logLevels: LEVELS.slice(0, { fatal: 1, error: 2, warn: 3, info: 4, debug: 5 }[env.LOG_LEVEL]),
 });
-const database = createDatabase(env.DATABASE_URL, { max: 4, applicationName: 'runtruck-worker' });
+// PostgreSQL ends a transaction left idle this long, releasing its locks and the vacuum
+// horizon (docs/17-event-architecture.md §2): no worker transaction waits on anything else.
+const database = createDatabase(env.DATABASE_URL, { max: 4, applicationName: 'runtruck-worker', idleInTransactionTimeoutMs: IDLE_IN_TRANSACTION_TIMEOUT_MS });
+// The consumer's connection: BullMQ's blocking commands need maxRetriesPerRequest null.
 const connection = new Redis(env.REDIS_URL, { maxRetriesPerRequest: null });
+// The publisher's own connection fails fast while Redis is unreachable (no offline queue),
+// so a batch records its error and is retried instead of waiting for Redis to return; the
+// publisher's enqueue deadline bounds it in any case.
+const queueConnection = new Redis(env.REDIS_URL, { enableOfflineQueue: false });
 
-const queue = new Queue<DomainEventJob>(DOMAIN_EVENTS_QUEUE, { connection });
+const queue = new Queue<DomainEventJob>(DOMAIN_EVENTS_QUEUE, { connection: queueConnection });
 const publisher = new OutboxPublisher(database.db, queue);
 const handlers: DomainEventHandler[] = [new EventLogHandler()];
 
@@ -69,7 +77,7 @@ async function shutdown(): Promise<void> {
   clearInterval(purgeTimer);
   await worker.close();
   await queue.close();
-  await connection.quit();
+  await Promise.all([connection.quit(), queueConnection.quit()]);
   await database.close();
   logger.log('Worker stopped');
 }

@@ -51,10 +51,10 @@ export class SettlementsService {
       // One instant (demo-pinned, D4) for approved_at, the audit rows and the events.
       const now = this.clock.now(ctx.timezone);
       const approved = await this.repository.approveReady(tx, org, { periodStart: input.periodStart, approvedAt: now, approvedByUserId: ctx.userId });
-      for (const settlement of approved) {
-        await this.audit.record(tx, ctx, settlementApprovedAudit(settlement, now, ctx.userId));
-        await this.events.emit(tx, ctx, settlementApprovedEvent(settlement), now);
-      }
+      // One audit row and one event per settlement, written as two multi-row INSERTs
+      // (not 2 × N round trips while the approved rows stay locked).
+      await this.audit.recordMany(tx, ctx, approved.map((settlement) => settlementApprovedAudit(settlement, now, ctx.userId)));
+      await this.events.emitMany(tx, ctx, approved.map(settlementApprovedEvent), now);
       const { rows, meta } = await this.readPeriod(tx, org, input.periodStart, APPROVE_PAGE);
       return { rows, meta: { ...meta, approvedNow: approved.length } };
     });

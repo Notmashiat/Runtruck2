@@ -81,12 +81,6 @@ const billToJoin = and(eq(billTo.organizationId, loads.organizationId), eq(billT
 export type NewLoadRow = typeof loads.$inferInsert;
 export type NewLoadStopRow = typeof loadStops.$inferInsert;
 
-export interface BoardPage {
-  rows: LoadListRow[];
-  // count(*) OVER () of the filter; null when the page is empty.
-  total: number | null;
-}
-
 // Reads and writes of the loads module (docs/api/loads.md §3.3, §4.3, §6.4). Every
 // method takes the session's organization and filters on it; child rows are read only
 // for the loads of the page (`load_id IN (…)`), never organization-wide.
@@ -98,33 +92,33 @@ export class LoadsRepository {
     return this.db;
   }
 
-  // Board loads (archived excluded) of the given statuses, newest first (03 §1.10).
-  async boardPage(organizationId: string, statuses: readonly LoadStatus[] | null, limit: number, offset: number): Promise<BoardPage> {
+  // Board loads (archived excluded) of the given statuses, newest first (03 §1.10). The
+  // page's ids come first, from loads_org_board_idx in board order, so the scan stops at
+  // OFFSET + LIMIT; customer, carrier and the `created` activity are then read for those
+  // rows only. No total is counted here: GET /loads takes it from the board status counts
+  // it reads anyway (docs/api/loads.md §3.3).
+  async boardPage(organizationId: string, statuses: readonly LoadStatus[] | null, limit: number, offset: number): Promise<LoadListRow[]> {
     const filters: SQL[] = [eq(loads.organizationId, organizationId), isNull(loads.archivedAt)];
     if (statuses) filters.push(inArray(loads.status, [...statuses]));
-    const rows = await this.db
-      .select({ ...listColumns, total: sql<number>`count(*) over ()`.mapWith(Number) })
+    const page = this.db
+      .select({ id: loads.id })
       .from(loads)
-      .innerJoin(customers, customerJoin)
-      .leftJoin(carriers, carrierJoin)
       .where(and(...filters))
       .orderBy(desc(loads.createdAt), desc(loads.loadNumber))
       .limit(limit)
-      .offset(offset);
-    return { rows: rows.map(({ total: _total, ...row }) => row), total: rows[0]?.total ?? null };
+      .offset(offset)
+      .as('page');
+    return this.db
+      .select(listColumns)
+      .from(page)
+      .innerJoin(loads, and(eq(loads.organizationId, organizationId), eq(loads.id, page.id)))
+      .innerJoin(customers, customerJoin)
+      .leftJoin(carriers, carrierJoin)
+      .orderBy(desc(loads.createdAt), desc(loads.loadNumber));
   }
 
-  async boardCount(organizationId: string, statuses: readonly LoadStatus[] | null): Promise<number> {
-    const filters: SQL[] = [eq(loads.organizationId, organizationId), isNull(loads.archivedAt)];
-    if (statuses) filters.push(inArray(loads.status, [...statuses]));
-    const [row] = await this.db
-      .select({ n: sql<number>`count(*)`.mapWith(Number) })
-      .from(loads)
-      .where(and(...filters));
-    return row?.n ?? 0;
-  }
-
-  // meta.summary: status counts over board loads (index loads_org_status_idx).
+  // meta.summary (and the page total): status counts over board loads, an index-only scan of
+  // the partial loads_org_board_status_idx.
   async boardStatusCounts(organizationId: string): Promise<{ status: LoadStatus; count: number }[]> {
     return this.db
       .select({ status: loads.status, count: sql<number>`count(*)`.mapWith(Number) })

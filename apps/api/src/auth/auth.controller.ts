@@ -42,6 +42,10 @@ export class AuthController {
   async logout(@Auth() ctx: AuthContext, @Res({ passthrough: true }) res: Response): Promise<null> {
     await this.auth.logout(ctx);
     res.clearCookie(SESSION_COOKIE, this.cookieOptions());
+    // Drop anything the browser cached for this origin while signed in (API responses are
+    // no-store, but pages and assets may not be), so the next person at a shared computer
+    // cannot read it back (docs/05-authentication.md §3).
+    res.setHeader('Clear-Site-Data', '"cache"');
     return null;
   }
 

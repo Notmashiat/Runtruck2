@@ -6,7 +6,7 @@ import { toNumber } from '../common/list/list-query.js';
 
 // The uninvoiced-loads rule (docs/03-database.md §6.0.4, docs/api/billing.md §3), shared by
 // GET /billing/uninvoiced-loads (and so the header's "Invoice N loads") and the Dashboard's
-// "Unbilled loads" tile, which must use this predicate or UninvoicedLoadsQuery.summary()
+// "Unbilled loads" tile, which must use this predicate or UninvoicedLoadsQuery.list()
 // rather than re-implement it (docs/api/dashboard.md §3).
 
 // A load (board or archived) in a delivered status that no invoice item references (any
@@ -24,8 +24,10 @@ const STOP_LABEL = sql`coalesce(f.market_city, f.city, s.city) || ', ' || coales
 
 // One row per uninvoiced load of the organization, with everything the list and the
 // summary need. Every relation carries the organization predicate (billing.md §1).
+// MATERIALIZED: the page, the aggregate and the oldest row all read it, so the anti-join
+// runs once per request.
 function uninvoicedCte(organizationId: string): SQL {
-  return sql`WITH uninvoiced AS (
+  return sql`WITH uninvoiced AS MATERIALIZED (
     SELECT l.id AS load_id, l.load_number, l.customer_id, cu.name AS customer_name,
            l.line_haul_cents::bigint + l.fuel_surcharge_cents + l.accessorial_cents AS amount_cents,
            CASE WHEN pu.label IS NULL OR dl.label IS NULL THEN NULL ELSE pu.label || ' → ' || dl.label END AS route,
@@ -62,9 +64,19 @@ interface UninvoicedDbRow extends Record<string, unknown> {
   amount_cents: string;
 }
 
-interface SummaryDbRow extends Record<string, unknown> {
+// One result row per page row, each carrying the summary columns; a page past the end
+// yields one row with the summary and null page columns.
+interface ListDbRow extends Record<string, unknown> {
+  load_id: string | null;
+  load_number: number | null;
+  customer_id: string | null;
+  customer_name: string | null;
+  route: string | null;
+  delivered_on: string | null;
+  pod_attached: boolean | null;
+  amount_cents: string | null;
   load_count: number;
-  amount_cents: string;
+  total_amount_cents: string;
   customer_count: number;
   missing_pod_count: number;
   oldest_load_id: string | null;
@@ -87,44 +99,58 @@ function toRow(r: UninvoicedDbRow): UninvoicedLoadRow {
   };
 }
 
+function toSummary(r: ListDbRow): UninvoicedLoadsSummary {
+  return {
+    loadCount: r.load_count,
+    amountCents: toNumber(r.total_amount_cents),
+    customerCount: r.customer_count,
+    missingPodCount: r.missing_pod_count,
+    oldest:
+      r.oldest_load_id && r.oldest_load_number !== null && r.oldest_delivered_on && r.oldest_age_days !== null
+        ? { loadId: r.oldest_load_id, loadNumber: r.oldest_load_number, deliveredOn: r.oldest_delivered_on, ageDays: r.oldest_age_days }
+        : null,
+  };
+}
+
 @Injectable()
 export class UninvoicedLoadsQuery {
-  // Rows in list order (delivered_on DESC NULLS LAST, load_number DESC; = Runtruck1's order).
-  async rows(db: DbExecutor, organizationId: string, page: { limit: number; offset: number }): Promise<UninvoicedLoadRow[]> {
-    const result = await db.execute<UninvoicedDbRow>(sql`${uninvoicedCte(organizationId)}
-      SELECT load_id, load_number, customer_id, customer_name, route, delivered_on::text AS delivered_on, pod_attached, amount_cents
-      FROM uninvoiced
-      ORDER BY delivered_on DESC NULLS LAST, load_number DESC
-      LIMIT ${page.limit} OFFSET ${page.offset}`);
-    return result.rows.map(toRow);
-  }
-
-  // The KPI figures over every uninvoiced load (billing.md §3.2); `today` is the org's business date.
-  async summary(db: DbExecutor, organizationId: string, today: string): Promise<UninvoicedLoadsSummary> {
-    const result = await db.execute<SummaryDbRow>(sql`${uninvoicedCte(organizationId)}
-      SELECT agg.*, o.load_id AS oldest_load_id, o.load_number AS oldest_load_number,
-             o.delivered_on::text AS oldest_delivered_on, (${today}::date - o.delivered_on) AS oldest_age_days
-      FROM (
+  // One page in list order (delivered_on DESC NULLS LAST, load_number DESC; = Runtruck1's
+  // order) and the KPI figures over every uninvoiced load (billing.md §3.2), in ONE statement
+  // over one materialized set, so each request evaluates the uninvoiced rule once. `today` is
+  // the organization's business date.
+  async list(
+    db: DbExecutor,
+    organizationId: string,
+    today: string,
+    page: { limit: number; offset: number },
+  ): Promise<{ rows: UninvoicedLoadRow[]; summary: UninvoicedLoadsSummary }> {
+    const result = await db.execute<ListDbRow>(sql`${uninvoicedCte(organizationId)},
+      summary AS (
         SELECT count(*)::int AS load_count,
-               coalesce(sum(amount_cents), 0)::bigint AS amount_cents,
+               coalesce(sum(amount_cents), 0)::bigint AS total_amount_cents,
                count(DISTINCT customer_id)::int AS customer_count,
                (count(*) FILTER (WHERE NOT pod_attached))::int AS missing_pod_count
-        FROM uninvoiced) agg
-      LEFT JOIN LATERAL (
+        FROM uninvoiced),
+      oldest AS (
         SELECT load_id, load_number, delivered_on FROM uninvoiced
         WHERE delivered_on IS NOT NULL
-        ORDER BY delivered_on ASC, load_number DESC LIMIT 1) o ON true`);
-    const r = result.rows[0];
-    if (!r) throw new Error('Uninvoiced summary returned no row');
-    return {
-      loadCount: r.load_count,
-      amountCents: toNumber(r.amount_cents),
-      customerCount: r.customer_count,
-      missingPodCount: r.missing_pod_count,
-      oldest:
-        r.oldest_load_id && r.oldest_load_number !== null && r.oldest_delivered_on && r.oldest_age_days !== null
-          ? { loadId: r.oldest_load_id, loadNumber: r.oldest_load_number, deliveredOn: r.oldest_delivered_on, ageDays: r.oldest_age_days }
-          : null,
-    };
+        ORDER BY delivered_on ASC, load_number DESC LIMIT 1),
+      page AS (
+        SELECT * FROM uninvoiced
+        ORDER BY delivered_on DESC NULLS LAST, load_number DESC
+        LIMIT ${page.limit} OFFSET ${page.offset})
+      SELECT p.load_id, p.load_number, p.customer_id, p.customer_name, p.route, p.delivered_on::text AS delivered_on,
+             p.pod_attached, p.amount_cents,
+             s.load_count, s.total_amount_cents, s.customer_count, s.missing_pod_count,
+             o.load_id AS oldest_load_id, o.load_number AS oldest_load_number,
+             o.delivered_on::text AS oldest_delivered_on, (${today}::date - o.delivered_on) AS oldest_age_days
+      FROM summary s
+      LEFT JOIN oldest o ON true
+      LEFT JOIN page p ON true
+      ORDER BY p.delivered_on DESC NULLS LAST, p.load_number DESC`);
+    const first = result.rows[0];
+    if (!first) throw new Error('Uninvoiced list returned no row');
+    const rows = result.rows.filter((r): r is ListDbRow & UninvoicedDbRow => r.load_id !== null).map(toRow);
+    return { rows, summary: toSummary(first) };
   }
 }

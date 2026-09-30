@@ -30,6 +30,11 @@ export class AuthService {
     private readonly audit: AuditService,
   ) {}
 
+  // Every attempt is counted before the password is checked, so parallel guesses cannot
+  // overshoot a limit. A successful sign-in then takes its hit back from the per-IP counter
+  // and clears the per-email one: only failures use up an address's budget, so the
+  // sign-ins of everyone behind one address (an office NAT, or every browser when no edge
+  // proxy sets X-Forwarded-For) cannot lock that address out (docs/05-authentication.md §2).
   async login(input: LoginInput, meta: { ipAddress?: string; userAgent?: string }): Promise<LoginResult> {
     const emailKey = `rl:login:email:${input.email}`;
     const ipKey = `rl:login:ip:${meta.ipAddress ?? 'unknown'}`;
@@ -68,7 +73,7 @@ export class AuthService {
       );
       return created;
     });
-    await this.limiter.reset(emailKey);
+    await Promise.all([this.limiter.reset(emailKey), this.limiter.release(ipKey)]);
 
     return { session, userId: user.id, organizationId: membership.organizationId };
   }

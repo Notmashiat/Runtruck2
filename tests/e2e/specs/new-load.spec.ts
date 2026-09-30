@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, test } from './fixtures.js';
 import { latestAuditNext, resetDemoData } from '../demo-data.js';
 import { expectKpis, field, signIn } from './helpers.js';
 

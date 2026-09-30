@@ -38,8 +38,10 @@ export class CustomersRepository {
 
   // Every customer of the organization with its YTD load aggregates and open AR, in one
   // statement (customers.md §2.7). It reads only this year's candidate loads (a stop dated
-  // in YTD, or a stop-less load invoiced in YTD, 01 C8) and the open invoices, never the
-  // organization's whole history; stops are looked up per candidate load (LATERAL … LIMIT 1).
+  // in YTD through load_stops_org_date_idx, or an item of an invoice issued in YTD through
+  // invoices_org_issued_idx, 01 C8) and the open invoices, never the organization's whole
+  // history; stops are looked up per candidate load (LATERAL … LIMIT 1) and the first
+  // invoice's date only for a load without stops.
   // Every table read and every join is scoped to the organization.
   //   load date = first pickup's appointment date, else the first invoice's issue date;
   //   revenue   = line haul + fuel surcharge + accessorials, cast to bigint before adding;
@@ -68,10 +70,13 @@ export class CustomersRepository {
         LEFT JOIN LATERAL (SELECT s.appointment_date, s.window_close, s.timezone, s.arrived_at FROM load_stops s
                            WHERE s.organization_id = l.organization_id AND s.load_id = l.id
                            ORDER BY (s.kind <> 'delivery'), s.sequence DESC LIMIT 1) ls ON true
-        LEFT JOIN LATERAL (SELECT min(i.issued_on) AS issued_on FROM invoice_items ii
-                           JOIN invoices i ON i.organization_id = ii.organization_id AND i.id = ii.invoice_id
-                           WHERE ii.organization_id = l.organization_id AND ii.load_id = l.id) fi ON true
-        WHERE coalesce(fs.appointment_date, fi.issued_on) BETWEEN ${ytdStart}::date AND ${today}::date),
+        -- The first invoice's date only when there is no first stop date: COALESCE evaluates
+        -- the subquery lazily, so loads with stops never touch invoices here.
+        WHERE coalesce(fs.appointment_date,
+                       (SELECT min(i.issued_on) FROM invoice_items ii
+                        JOIN invoices i ON i.organization_id = ii.organization_id AND i.id = ii.invoice_id
+                        WHERE ii.organization_id = l.organization_id AND ii.load_id = l.id))
+              BETWEEN ${ytdStart}::date AND ${today}::date),
       ytd AS (
         SELECT customer_id,
                count(*)::int AS loads_ytd,

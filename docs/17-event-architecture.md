@@ -6,7 +6,7 @@ Important business actions produce **domain events** (architecture §23). Events
 
 | Piece                                | Status                                                                                                                                                                | Code                                                 |
 | ------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------- |
-| Outbox table `events`                | Built: created by migration `0000_init` (migrations `0000`–`0003` exist and are applied by `pnpm db:migrate`, `db:reset` and the integration-test setup, [03 §9.1](03-database.md)). | `packages/database/src/schema/platform.ts`, `packages/database/drizzle/` |
+| Outbox table `events`                | Built: created by migration `0000_init` (migrations `0000`–`0004` exist and are applied by `pnpm db:migrate`, `db:reset` and the integration-test setup, [03 §9.1](03-database.md)). | `packages/database/src/schema/platform.ts`, `packages/database/drizzle/` |
 | `EventsService.emit(tx, ctx, event)` | Built                                                                                                                                                                 | `apps/api/src/events/events.service.ts`              |
 | Outbox publisher (to BullMQ)         | Built                                                                                                                                                                 | `apps/api/src/events/outbox-publisher.ts`            |
 | Worker and handler registry          | Built. The only handler is `EventLogHandler`, which logs each event.                                                                                                  | `apps/api/src/worker.ts`, `events/event-handlers.ts` |
@@ -26,13 +26,21 @@ HTTP request
      COMMIT  (all three, or none)
 
 Worker process (poll loop)
-  └─ OutboxPublisher.publishBatch():
-       BEGIN
-       SELECT … FROM events WHERE published_at IS NULL
-         ORDER BY occurred_at LIMIT 100 FOR UPDATE SKIP LOCKED
-       queue.addBulk(jobs with jobId = event id)    → Redis / BullMQ "domain-events"
-       UPDATE events SET published_at = now(), publish_attempts += 1, last_error = NULL
-       COMMIT
+  └─ OutboxPublisher.publishBatch():                 (no transaction spans these steps)
+       1 claim (one autocommitted statement):
+         UPDATE events SET claimed_until = now() + 60 s
+         WHERE id IN (SELECT id FROM events
+                      WHERE published_at IS NULL AND publish_attempts < 10
+                        AND (claimed_until IS NULL OR claimed_until < now())
+                      ORDER BY occurred_at LIMIT 100 FOR UPDATE SKIP LOCKED)
+         RETURNING *
+       2 queue.addBulk(jobs with jobId = event id)   → Redis / BullMQ "domain-events"
+         with a 10 s deadline
+       3 settle (one statement):
+         ok:     UPDATE events SET published_at = now(), publish_attempts += 1,
+                                   last_error = NULL, claimed_until = NULL
+         failed: UPDATE events SET publish_attempts += 1, last_error = <message>,
+                                   claimed_until = NULL
   └─ BullMQ Worker → dispatchEvent(handlers, job.data)
 ```
 
@@ -47,6 +55,7 @@ Worker process (poll loop)
 - `request_id` (from the request context, for correlation)
 - `occurred_at`
 - `published_at`, `publish_attempts`, `last_error`
+- `claimed_until` (the publisher's lease, migration `0004`)
 
 Two indexes support it:
 
@@ -57,8 +66,10 @@ Rules:
 
 - `EventsService.emit` **must be called with the transaction (`tx`)** that makes the change. Calling it with the root `db` outside a transaction defeats the outbox.
 - `occurred_at` defaults to the database's `now()`, which is the transaction's start time. Pass `occurredAt` explicitly when the instant is shown to users and must follow the demo clock (`ClockService.now(tz)`, docs/01 D4).
-- `FOR UPDATE SKIP LOCKED` lets several worker processes publish in parallel without claiming the same rows.
-- If `addBulk` fails (Redis unavailable), the batch is not marked published. `publish_attempts` is incremented, `last_error` records the message (up to 1,000 characters), and the batch is retried on the next poll. There is **no retry cap** today, so a batch that can never be enqueued is retried every poll indefinitely (see [18](18-background-jobs.md) §5).
+- **No transaction is held across Redis** (01 C87). A Redis that accepts the connection and never answers must not keep a PostgreSQL session "idle in transaction" with row locks and a pinned vacuum horizon, so the claim and the settle are short statements and the enqueue runs between them. The publisher's Redis connection has no offline queue (a command fails at once while Redis is unreachable), and the enqueue has a deadline (`enqueueTimeoutMs`, 10 s) in any case. As a backstop the worker's and the API's sessions run with `idle_in_transaction_session_timeout = 60s`.
+- The claim's `FOR UPDATE SKIP LOCKED` and the lease let several worker processes publish in parallel without claiming the same rows. A worker that dies after claiming leaves its rows leased; they become due again when the lease (60 s, longer than the enqueue deadline) ends.
+- If `addBulk` fails or misses its deadline (Redis unavailable), the batch is not marked published: `publish_attempts` is incremented, `last_error` records the message (up to 1,000 characters), the lease is released and the batch is retried on the next poll. After `MAX_PUBLISH_ATTEMPTS` (10) failed attempts a row is no longer claimed (dead-lettered: it stays with its last error for an operator, [18](18-background-jobs.md) §5). An enqueue that finishes after its deadline is harmless: the job id is the event id, so the retry is deduplicated.
+- `apps/api/test/outbox.int.test.ts` proves it: a hanging enqueue leaves no session idle in transaction and counts one attempt after the deadline; leased rows are skipped until the lease ends; concurrent publishers claim disjoint batches.
 
 ## 3. Naming and payload rules
 
@@ -75,7 +86,7 @@ Rules:
 
 - **At least once.** An event can reach a handler more than once:
   - BullMQ retries a failed job.
-  - The publisher can re-enqueue a batch if its commit fails after `addBulk` succeeded.
+  - The publisher can re-enqueue a batch if its settle statement fails after `addBulk` succeeded, or when an enqueue finishes after its deadline.
 - **Deduplication at enqueue.** The job id is the event id, so BullMQ ignores a second `add` while the first job is still stored. Completed jobs are kept up to the most recent 1,000 and failed jobs up to 5,000. After a job is pruned, a re-publish would run again.
 - **Handlers must therefore be idempotent**, keyed by `eventId`. They check before acting ("notification for event X already sent?") or use an upsert or unique constraint on the event id.
 - **No ordering guarantee.** The publisher enqueues in `occurred_at` order, but the worker runs 8 jobs concurrently and several publishers may run at once. Handlers must not assume that event A for an aggregate is processed before event B. Re-read the current state instead.

@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { businessDateSchema, pageQuerySchema } from './common.js';
+import { businessDateSchema, pageQuerySchema, storableTextSchema } from './common.js';
 
 // Planner input schemas (the shared organization calendar, docs/01 D8).
 // Specified in docs/api/planner.md; the API parses every body and query with
@@ -19,12 +19,14 @@ const plannerDateSchema = businessDateSchema;
 // Wall-clock HH:MM (24 h), organization timezone for office events.
 const plannerTimeSchema = z.iso.time({ precision: -1, error: 'Use a HH:MM time.' });
 
+// Every planner string is storable text (no NUL, well-formed UTF-16): titles and fields
+// also land in audit_logs jsonb, which refuses both (common.ts).
+
 // Runtruck1 trims the title on save and requires it.
-const plannerTitleSchema = z.string().trim().min(1, 'Enter a title.').max(200, 'Use at most 200 characters.');
+const plannerTitleSchema = storableTextSchema().trim().min(1, 'Enter a title.').max(200, 'Use at most 200 characters.');
 
 // "City, state": trimmed; blank becomes null (Runtruck1 `place?.trim() || undefined`).
-const plannerPlaceSchema = z
-  .string()
+const plannerPlaceSchema = storableTextSchema()
   .max(120, 'Use at most 120 characters.')
   .nullable()
   .transform((v) => {
@@ -33,15 +35,14 @@ const plannerPlaceSchema = z
   });
 
 // Notes are NOT trimmed (Runtruck1 B6, reproduced per D6); an empty string becomes null.
-const plannerNotesSchema = z
-  .string()
+const plannerNotesSchema = storableTextSchema()
   .max(2000, 'Use at most 2,000 characters.')
   .nullable()
   .transform((v) => (v === '' ? null : v));
 
 // Free-text attendee names, in entry order: trimmed, blanks dropped (Runtruck1 save).
 const plannerPeopleSchema = z
-  .array(z.string().max(100, 'Use at most 100 characters per name.'))
+  .array(storableTextSchema().max(100, 'Use at most 100 characters per name.'))
   .max(50, 'List at most 50 people.')
   .transform((list) => list.map((p) => p.trim()).filter((p) => p !== ''));
 
@@ -155,8 +156,7 @@ export type PlannerEventsQuery = z.output<typeof plannerEventsQuerySchema>;
 
 // Stored as typed (Runtruck1 does not trim); blank or whitespace-only becomes
 // "Untitled" (Runtruck1's onBlur rule, enforced server-side).
-const plannerColorCodeLabelSchema = z
-  .string()
+const plannerColorCodeLabelSchema = storableTextSchema()
   .max(80, 'Use at most 80 characters.')
   .transform((v) => (v.trim() === '' ? 'Untitled' : v));
 

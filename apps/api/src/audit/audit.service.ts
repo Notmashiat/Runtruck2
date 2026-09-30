@@ -18,17 +18,27 @@ export interface AuditEntry {
 @Injectable()
 export class AuditService {
   async record(tx: DbExecutor, ctx: Pick<AuthContext, 'organizationId' | 'userId'>, entry: AuditEntry): Promise<void> {
-    await tx.insert(schema.auditLogs).values({
-      organizationId: ctx.organizationId,
-      actorUserId: ctx.userId,
-      action: entry.action,
-      entityType: entry.entityType,
-      entityId: entry.entityId,
-      entityLabel: entry.entityLabel ?? null,
-      previous: entry.previous ?? null,
-      next: entry.next ?? null,
-      requestId: currentRequestId() ?? null,
-      ...(entry.occurredAt ? { occurredAt: entry.occurredAt } : {}),
-    });
+    await this.recordMany(tx, ctx, [entry]);
+  }
+
+  // Several rows of one change in ONE multi-row INSERT (architecture §38: no N+1 writes),
+  // e.g. one row per settlement a single approval moved. Nothing is written for [].
+  async recordMany(tx: DbExecutor, ctx: Pick<AuthContext, 'organizationId' | 'userId'>, entries: readonly AuditEntry[]): Promise<void> {
+    if (entries.length === 0) return;
+    const requestId = currentRequestId() ?? null;
+    await tx.insert(schema.auditLogs).values(
+      entries.map((entry) => ({
+        organizationId: ctx.organizationId,
+        actorUserId: ctx.userId,
+        action: entry.action,
+        entityType: entry.entityType,
+        entityId: entry.entityId,
+        entityLabel: entry.entityLabel ?? null,
+        previous: entry.previous ?? null,
+        next: entry.next ?? null,
+        requestId,
+        ...(entry.occurredAt ? { occurredAt: entry.occurredAt } : {}),
+      })),
+    );
   }
 }

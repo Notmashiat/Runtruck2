@@ -152,8 +152,15 @@ export const loads = pgTable(
     tenantFk('loads_bill_to_customer_fk', t.organizationId, t.billToCustomerId, customers).onDelete('restrict'),
     tenantFk('loads_carrier_fk', t.organizationId, t.carrierId, carriers).onDelete('restrict'),
     uniqueIndex('loads_org_number_uq').on(t.organizationId, t.loadNumber),
+    // Board order `created_at DESC, load_number DESC` exactly (DESC means NULLS FIRST in
+    // PostgreSQL; an index built NULLS LAST can never supply that order), so a board page
+    // is an index range scan that stops at LIMIT (03 §5.6, migration 0004).
     index('loads_org_board_idx')
-      .on(t.organizationId, t.createdAt.desc())
+      .on(t.organizationId, t.createdAt.desc().nullsFirst(), t.loadNumber.desc().nullsFirst())
+      .where(sql`${t.archivedAt} is null`),
+    // Board status counts (GET /loads meta.summary and total) as an index-only scan.
+    index('loads_org_board_status_idx')
+      .on(t.organizationId, t.status)
       .where(sql`${t.archivedAt} is null`),
     index('loads_org_status_idx').on(t.organizationId, t.status),
     index('loads_org_customer_idx').on(t.organizationId, t.customerId),
@@ -312,5 +319,9 @@ export const loadActivity = pgTable(
     tenantKey('load_activity', t),
     tenantFk('load_activity_load_fk', t.organizationId, t.loadId, loads).onDelete('cascade'),
     uniqueIndex('load_activity_load_sequence_uq').on(t.organizationId, t.loadId, t.sequence),
+    // The load's `created` row (the board's "created" instant): one index probe per page row.
+    index('load_activity_org_load_created_idx')
+      .on(t.organizationId, t.loadId, t.sequence)
+      .where(sql`${t.kind} = 'created'`),
   ],
 );

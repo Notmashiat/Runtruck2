@@ -1,7 +1,7 @@
 import { type ArgumentsHost, Catch, type ExceptionFilter, HttpException, HttpStatus, Logger } from '@nestjs/common';
 import type { Response } from 'express';
 import type { ApiErrorBody } from '@runtruck/types';
-import { currentRequestId } from '../request-context/request-context.js';
+import { currentRequestId, responseRequestId } from '../request-context/request-context.js';
 import { AppError, type ErrorCategory } from './app-error.js';
 
 const STATUS_TO_CATEGORY: Record<number, ErrorCategory> = {
@@ -27,6 +27,23 @@ const SAFE_MESSAGES: Record<ErrorCategory, string> = {
   INTERNAL_ERROR: 'Something went wrong. Try again, and contact support with the request ID if it keeps happening.',
 };
 
+// Statuses whose generic category message would mislead: the body itself was refused.
+const STATUS_MESSAGES: Partial<Record<number, string>> = {
+  [HttpStatus.PAYLOAD_TOO_LARGE]: 'The request body is too large.',
+  [HttpStatus.UNSUPPORTED_MEDIA_TYPE]: 'The request body uses an unsupported encoding or character set.',
+};
+
+// A client error raised by Express or its body parser (the `http-errors` shape: a numeric
+// 4xx `status`/`statusCode` and `expose: true`), e.g. a JSON body over the limit (413) or
+// an unsupported Content-Encoding or charset (415). Such errors are not HttpExceptions.
+function clientHttpErrorStatus(exception: unknown): number | null {
+  if (typeof exception !== 'object' || exception === null) return null;
+  const { status, statusCode, expose } = exception as { status?: unknown; statusCode?: unknown; expose?: unknown };
+  const code = typeof status === 'number' ? status : statusCode;
+  if (expose !== true || typeof code !== 'number' || !Number.isInteger(code) || code < 400 || code > 499) return null;
+  return code;
+}
+
 // Turns every thrown value into the standard error envelope (architecture §15, §29).
 // Only AppError messages reach users verbatim; everything unexpected becomes a
 // generic INTERNAL_ERROR and is logged server-side with the request ID.
@@ -36,7 +53,9 @@ export class AllExceptionsFilter implements ExceptionFilter {
 
   catch(exception: unknown, host: ArgumentsHost): void {
     const res = host.switchToHttp().getResponse<Response>();
-    const requestId = currentRequestId() ?? 'unknown';
+    // The async context is the source; the response header covers an error raised where the
+    // context did not reach (the middleware sets both before any other code runs).
+    const requestId = currentRequestId() ?? responseRequestId(res) ?? 'unknown';
     const { status, body } = this.toResponse(exception, requestId);
 
     if (status >= 500) {
@@ -62,10 +81,10 @@ export class AllExceptionsFilter implements ExceptionFilter {
       };
     }
 
-    if (exception instanceof HttpException) {
-      const status = exception.getStatus();
+    const status = exception instanceof HttpException ? exception.getStatus() : clientHttpErrorStatus(exception);
+    if (status !== null) {
       const category = STATUS_TO_CATEGORY[status] ?? (status >= 500 ? 'INTERNAL_ERROR' : 'VALIDATION_ERROR');
-      return { status, body: { error: { code: category, message: SAFE_MESSAGES[category], requestId } } };
+      return { status, body: { error: { code: category, message: STATUS_MESSAGES[status] ?? SAFE_MESSAGES[category], requestId } } };
     }
 
     return {

@@ -370,7 +370,7 @@ WHERE v.organization_id = $org
 ORDER BY v.occurred_on DESC, v.id;
 ```
 
-Index: `violations_org_occurred_idx (organization_id, occurred_on DESC)`. This statement carries the page's predicates, `LIMIT`/`OFFSET` and `count(*) OVER ()` (§1.2 statement 1); the summary is the separate SQL aggregate of §1.2 statement 2.
+Index: `violations_org_occurred_idx (organization_id, occurred_on DESC, id)`, exactly this order (`DESC` = `NULLS FIRST`, migration `0004`; the earlier `NULLS LAST` build could not supply it). This statement carries the page's predicates, `LIMIT`/`OFFSET` and `count(*) OVER ()` (§1.2 statement 1); the summary is the separate SQL aggregate of §1.2 statement 2.
 
 ## 6. `GET /api/v1/claims`
 

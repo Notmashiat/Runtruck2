@@ -147,7 +147,7 @@ WITH candidate AS (   -- every load whose load date can fall in YTD (§1.3)
   FROM load_stops s                                     -- a stop dated in YTD (load_stops_org_date_idx)
   WHERE s.organization_id = $org AND s.appointment_date BETWEEN $ytdStart AND $today
   UNION
-  SELECT ii.load_id                                     -- or an invoice issued in YTD (stop-less loads, 01 C8)
+  SELECT ii.load_id                                     -- or an invoice issued in YTD (stop-less loads, 01 C8; invoices_org_issued_idx)
   FROM invoices i
   JOIN invoice_items ii ON ii.organization_id = i.organization_id AND ii.invoice_id = i.id
   WHERE i.organization_id = $org AND i.issued_on BETWEEN $ytdStart AND $today AND ii.load_id IS NOT NULL),
@@ -163,10 +163,13 @@ ytd_load AS (
   LEFT JOIN LATERAL (SELECT s.appointment_date, s.window_close, s.timezone, s.arrived_at FROM load_stops s
                      WHERE s.organization_id = l.organization_id AND s.load_id = l.id
                      ORDER BY (s.kind <> 'delivery'), s.sequence DESC LIMIT 1) ls ON true
-  LEFT JOIN LATERAL (SELECT min(i.issued_on) AS issued_on FROM invoice_items ii
-                     JOIN invoices i ON i.organization_id = ii.organization_id AND i.id = ii.invoice_id
-                     WHERE ii.organization_id = l.organization_id AND ii.load_id = l.id) fi ON true
-  WHERE coalesce(fs.appointment_date, fi.issued_on) BETWEEN $ytdStart AND $today),
+  -- the first invoice's date only when there is no first stop date: COALESCE evaluates the
+  -- scalar subquery lazily, so a load with stops never reads invoices here
+  WHERE coalesce(fs.appointment_date,
+                 (SELECT min(i.issued_on) FROM invoice_items ii
+                  JOIN invoices i ON i.organization_id = ii.organization_id AND i.id = ii.invoice_id
+                  WHERE ii.organization_id = l.organization_id AND ii.load_id = l.id))
+        BETWEEN $ytdStart AND $today),
 ytd AS (
   SELECT customer_id,
          count(*)::int AS loads_ytd,
@@ -196,7 +199,7 @@ WHERE c.organization_id = $org
 ORDER BY c.position, c.id;
 ```
 
-`UNION` removes duplicate candidates. The candidate set is exact: a YTD load either has its first pickup (a stop) dated in YTD, or has no stops and its first invoice issued in YTD; the final `WHERE` applies the load-date rule itself. Indexes used: `customers_org_position_idx`, `customer_contacts_primary_uq`, `load_stops_org_date_idx`, `load_stops_load_sequence_uq`, `invoice_items_org_load_idx`, `invoice_items_invoice_position_uq`, `invoices_org_status_issued_idx`, `payments_org_invoice_idx`. `onTimePercent` and the summary are computed in memory from these rows; `bigint` sums are converted with `Number()`.
+`UNION` removes duplicate candidates. The candidate set is exact: a YTD load either has its first pickup (a stop) dated in YTD, or has no stops and its first invoice issued in YTD; the final `WHERE` applies the load-date rule itself. Indexes used: `customers_org_position_idx`, `customer_contacts_primary_uq`, `load_stops_org_date_idx`, `load_stops_load_sequence_uq`, `invoice_items_org_load_idx`, `invoice_items_invoice_position_uq`, `invoices_org_issued_idx` (the candidate branch: invoices issued in YTD whatever their status; `invoices_org_status_issued_idx` cannot serve a date range without a status), `invoices_org_status_issued_idx` (open invoices), `payments_org_invoice_idx`. The statement still recomputes the year's aggregates on every request (D5); its cost grows with the year's volume, not the history. `onTimePercent` and the summary are computed in memory from these rows; `bigint` sums are converted with `Number()`.
 
 ### 2.8 `GET /api/v1/customers/options` (select lists)
 

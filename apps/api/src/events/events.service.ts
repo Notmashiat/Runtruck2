@@ -10,15 +10,30 @@ import type { DomainEvent } from './domain-events.js';
 @Injectable()
 export class EventsService {
   async emit(tx: DbExecutor, ctx: Pick<AuthContext, 'organizationId' | 'userId'>, event: DomainEvent, occurredAt?: Date): Promise<void> {
-    await tx.insert(schema.events).values({
-      organizationId: ctx.organizationId,
-      type: event.type,
-      aggregateType: event.aggregateType,
-      aggregateId: event.aggregateId,
-      payload: event.payload,
-      actorUserId: ctx.userId,
-      requestId: currentRequestId() ?? null,
-      ...(occurredAt ? { occurredAt } : {}),
-    });
+    await this.emitMany(tx, ctx, [event], occurredAt);
+  }
+
+  // Several events of one change in ONE multi-row INSERT (architecture §38: no N+1 writes).
+  // Nothing is written for [].
+  async emitMany(
+    tx: DbExecutor,
+    ctx: Pick<AuthContext, 'organizationId' | 'userId'>,
+    events: readonly DomainEvent[],
+    occurredAt?: Date,
+  ): Promise<void> {
+    if (events.length === 0) return;
+    const requestId = currentRequestId() ?? null;
+    await tx.insert(schema.events).values(
+      events.map((event) => ({
+        organizationId: ctx.organizationId,
+        type: event.type,
+        aggregateType: event.aggregateType,
+        aggregateId: event.aggregateId,
+        payload: event.payload,
+        actorUserId: ctx.userId,
+        requestId,
+        ...(occurredAt ? { occurredAt } : {}),
+      })),
+    );
   }
 }

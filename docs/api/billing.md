@@ -97,7 +97,9 @@ Every value equals Runtruck1's. The Dashboard "Unbilled loads" tile (`11`, `$34,
 
 ```sql
 -- $1 = ctx.organizationId, $2 = today (date)
-WITH uninvoiced AS (
+-- ONE statement per request: the page and the summary read one MATERIALIZED set, so the
+-- anti-join below runs once (it still reads every delivered load, 01 C86).
+WITH uninvoiced AS MATERIALIZED (
   SELECT l.id, l.load_number, l.customer_id, cu.name AS customer_name,
          l.line_haul_cents::bigint + l.fuel_surcharge_cents + l.accessorial_cents AS amount_cents,   -- cast before adding (03 §6.0.3)
          pu.label AS pickup_label, dl.label AS delivery_label,
@@ -124,13 +126,15 @@ WITH uninvoiced AS (
     AND l.status IN ('needs_pod', 'delivered')
     AND NOT EXISTS (SELECT 1 FROM invoice_items ii
                     WHERE ii.organization_id = l.organization_id AND ii.load_id = l.id)
-)
--- page:    SELECT … FROM uninvoiced ORDER BY delivered_on DESC NULLS LAST, load_number DESC LIMIT … OFFSET …
--- summary: SELECT count(*), coalesce(sum(amount_cents), 0), count(DISTINCT customer_id),
---                 count(*) FILTER (WHERE NOT pod_attached),
---                 (SELECT row(id, load_number, delivered_on, $2 - delivered_on) FROM uninvoiced
---                   WHERE delivered_on IS NOT NULL ORDER BY delivered_on ASC, load_number DESC LIMIT 1)
---          FROM uninvoiced
+), summary AS (SELECT count(*), coalesce(sum(amount_cents), 0), count(DISTINCT customer_id),
+                       count(*) FILTER (WHERE NOT pod_attached) FROM uninvoiced),
+oldest AS (SELECT id, load_number, delivered_on FROM uninvoiced
+           WHERE delivered_on IS NOT NULL ORDER BY delivered_on ASC, load_number DESC LIMIT 1),
+page AS (SELECT * FROM uninvoiced ORDER BY delivered_on DESC NULLS LAST, load_number DESC LIMIT … OFFSET …)
+-- one result row per page row, each carrying the summary and the oldest row
+-- ($2 - delivered_on is its age); a page past the end is one row with the summary only
+SELECT page.*, summary.*, oldest.* FROM summary LEFT JOIN oldest ON true LEFT JOIN page ON true
+ORDER BY page.delivered_on DESC NULLS LAST, page.load_number DESC
 ```
 
 Indexes used: `loads_org_status_idx`, `invoice_items_org_load_idx` (anti-join), `load_stops_load_sequence_uq`, `documents_org_load_type_uq`, the customers and facilities tenant keys. The first-pickup / last-delivery / route / `delivered_on` expressions are the Loads domain's helpers (03 §6.0.3); the billing module imports them from the loads module rather than re-implementing them (§9).
@@ -225,15 +229,34 @@ Every value equals Runtruck1's; the month name and the factor's name are now dat
 
 ### 4.7 Query plan (no N+1)
 
+The page's ids are chosen **first**, and only those rows are decorated (totals, first item's load, latest payment), so a page costs the same whatever the organization's history ([04 §5.1](../04-api.md) rule 1):
+
 ```sql
 -- $1 = org, $2 = status, $3 = today, $4 = org timezone
+-- sent / overdue / draft: page AS MATERIALIZED (SELECT i.id FROM invoices i
+--   WHERE i.organization_id = $1 AND i.status = $2 ORDER BY <per status, §4.2> LIMIT … OFFSET …)
+-- paid (terminal, grows with the whole history): walk the payments newest first and keep each
+-- paid invoice's latest one, then append the paid invoices without any payment (NULLS LAST):
+--   head AS MATERIALIZED (SELECT i.id, py.received_at, i.invoice_number FROM payments py
+--     JOIN invoices i ON i.organization_id = py.organization_id AND i.id = py.invoice_id
+--     WHERE py.organization_id = $1 AND i.status = 'paid'
+--       AND NOT EXISTS (SELECT 1 FROM payments later WHERE later.organization_id = py.organization_id
+--                       AND later.invoice_id = py.invoice_id AND (later.received_at, later.id) > (py.received_at, py.id))
+--     ORDER BY py.received_at DESC, i.invoice_number LIMIT offset + limit),     -- payments_org_received_idx, backward
+--   tail AS (SELECT i.id, NULL, i.invoice_number FROM invoices i WHERE … status = 'paid'
+--     AND (SELECT count(*) FROM head) < offset + limit AND NOT EXISTS (a payment)
+--     ORDER BY i.invoice_number LIMIT offset + limit),
+--   page AS MATERIALIZED (SELECT id FROM (head UNION ALL tail) u
+--     ORDER BY received_at DESC NULLS LAST, invoice_number LIMIT … OFFSET …)
+WITH page AS (…)
 SELECT i.id, i.invoice_number, i.customer_id, cu.name, i.status, i.issued_on, i.due_on,
        $3 - i.issued_on AS age_days, $3 - i.due_on AS days_past_due,
        coalesce(t.total_cents, 0) AS amount_cents, coalesce(pt.paid_cents, 0) AS paid_cents,
        it1.load_id, l.load_number,
        lp.id AS payment_id, lp.received_at, (lp.received_at AT TIME ZONE $4)::date AS paid_on,
        lp.method, lp.factoring_company_id, fc.name AS factoring_company_name, lp.amount_cents AS payment_cents
-FROM invoices i
+FROM page
+JOIN invoices i ON i.organization_id = $1 AND i.id = page.id
 JOIN customers cu ON cu.organization_id = i.organization_id AND cu.id = i.customer_id
 LEFT JOIN LATERAL (SELECT sum(ii.amount_cents) AS total_cents FROM invoice_items ii
                    WHERE ii.organization_id = i.organization_id AND ii.invoice_id = i.id) t ON true
@@ -245,11 +268,10 @@ LEFT JOIN LATERAL (SELECT p.* FROM payments p
                    WHERE p.organization_id = i.organization_id AND p.invoice_id = i.id
                    ORDER BY p.received_at DESC, p.id DESC LIMIT 1) lp ON true
 LEFT JOIN factoring_companies fc ON fc.organization_id = lp.organization_id AND fc.id = lp.factoring_company_id
-WHERE i.organization_id = $1 AND i.status = $2
 ORDER BY <per status, §4.2>
 ```
 
-The summary is one statement over the same relation (for `sent` the filter is `status IN ('sent', 'overdue')` and the buckets are `count(*) FILTER (WHERE days_past_due …)` / `sum(outstanding) FILTER (…)`; `totalAccounts` and `collectedThisMonthCents` are scalar subqueries on `customers` and `payments`, both organization-filtered; `payments_org_received_idx` serves the month range). Indexes: `invoices_org_status_issued_idx`, `invoice_items_invoice_position_uq`, `payments_org_invoice_idx`, `payments_org_received_idx`.
+The summary is one statement over the same relation. The Paid summary covers every paid invoice by definition (`avgDaysToPay`), so it reads the paid history once but **set-based**, with no lateral or subquery per invoice: each invoice's latest payment from one `row_number() OVER (PARTITION BY invoice_id ORDER BY received_at DESC, id DESC)` pass over the organization's payments, joined by `invoice_id`, and `factoredCents` from one join of the factored paid invoices with their items. (For `sent` the filter is `status IN ('sent', 'overdue')` and the buckets are `count(*) FILTER (WHERE days_past_due …)` / `sum(outstanding) FILTER (…)`; `totalAccounts` and `collectedThisMonthCents` are scalar subqueries on `customers` and `payments`, both organization-filtered; `payments_org_received_idx` serves the month range). Indexes: `invoices_org_status_issued_idx`, `invoice_items_invoice_position_uq`, `payments_org_invoice_idx`, `payments_org_received_idx`.
 
 ### 4.8 Errors and tenancy
 

@@ -24,6 +24,10 @@ async function request<T, M extends object>(method: Method, path: string, body?:
   const res = await fetch(`/api/v1${path}`, {
     method,
     credentials: 'same-origin',
+    // Tenant data never enters the browser's HTTP cache, where it would outlive sign-out on
+    // a shared computer (the API also sends Cache-Control: no-store, docs/19 §2). React Query
+    // is the only client-side copy, and a full page load after sign-out drops it.
+    cache: 'no-store',
     headers: body === undefined || isForm ? { accept: 'application/json' } : { accept: 'application/json', 'content-type': 'application/json' },
     body: body === undefined ? undefined : isForm ? body : JSON.stringify(body),
   });

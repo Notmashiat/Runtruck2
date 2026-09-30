@@ -49,20 +49,23 @@ export class LoadsService {
   async list(ctx: AuthContext, query: ListLoadsQuery): Promise<{ data: LoadListItem[]; meta: LoadListMeta }> {
     const org = ctx.organizationId;
     const statuses = query.view === 'all' ? null : LOAD_BOARD_VIEW_STATUSES[query.view];
-    const summary = boardSummary(await this.repo.boardStatusCounts(org));
     const q = query.q ?? '';
 
     if (q === '') {
-      const page = await this.repo.boardPage(org, statuses, query.limit, query.offset);
-      const total = page.total ?? (query.offset > 0 ? await this.repo.boardCount(org, statuses) : 0);
-      return { data: await this.hydrate(org, page.rows), meta: { total, limit: query.limit, offset: query.offset, summary } };
+      const [counts, rows] = await Promise.all([this.repo.boardStatusCounts(org), this.repo.boardPage(org, statuses, query.limit, query.offset)]);
+      const summary = boardSummary(counts);
+      // The view's row count is its summary count: the same filter (board loads of the
+      // view's statuses), so no window count over the whole view is needed.
+      const total = summary.views[query.view];
+      return { data: await this.hydrate(org, rows), meta: { total, limit: query.limit, offset: query.offset, summary } };
     }
 
     // With q: the newest Q_SCAN_LIMIT rows of the view, matched over the shared view-model
     // rows (the web's search), then paged.
-    const scan = await this.repo.boardPage(org, statuses, Q_SCAN_LIMIT, 0);
+    const [counts, scan] = await Promise.all([this.repo.boardStatusCounts(org), this.repo.boardPage(org, statuses, Q_SCAN_LIMIT, 0)]);
+    const summary = boardSummary(counts);
     const context = { timeZone: ctx.timezone, today: this.clock.today(ctx.timezone) };
-    const matches = (await this.hydrate(org, scan.rows)).filter((item) => loadRowMatches(toLoadSearchRow(item, context), q));
+    const matches = (await this.hydrate(org, scan)).filter((item) => loadRowMatches(toLoadSearchRow(item, context), q));
     return {
       data: matches.slice(query.offset, query.offset + query.limit),
       meta: { total: matches.length, limit: query.limit, offset: query.offset, summary },

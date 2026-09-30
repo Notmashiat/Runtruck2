@@ -1,13 +1,11 @@
 import { type MiddlewareConsumer, Module, type NestModule } from '@nestjs/common';
 import { APP_FILTER, APP_INTERCEPTOR } from '@nestjs/core';
 import cookieParser from 'cookie-parser';
-import helmet from 'helmet';
 import { AuditModule } from './audit/audit.module.js';
 import { AuthModule } from './auth/auth.module.js';
 import { ClockModule } from './common/clock/clock.module.js';
 import { AllExceptionsFilter } from './common/errors/all-exceptions.filter.js';
 import { EnvelopeInterceptor } from './common/http/envelope.interceptor.js';
-import { requestContextMiddleware } from './common/request-context/request-context.js';
 import { ConfigModule } from './config/config.module.js';
 import { DatabaseModule } from './database/database.module.js';
 import { DOMAIN_MODULES } from './domain-modules.js';
@@ -25,7 +23,8 @@ import { RedisModule } from './redis/redis.module.js';
 })
 export class AppModule implements NestModule {
   configure(consumer: MiddlewareConsumer): void {
-    // Request id first so everything after it (including errors) can be correlated.
-    consumer.apply(requestContextMiddleware, helmet(), cookieParser()).forRoutes('*path');
+    // The request id, helmet and no-store run earlier, before the JSON body parser
+    // (create-app.ts), so they also cover requests the parser refuses.
+    consumer.apply(cookieParser()).forRoutes('*path');
   }
 }

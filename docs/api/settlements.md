@@ -134,9 +134,9 @@ Approves every `ready` settlement of one pay period: Runtruck1's "Approve all" /
    RETURNING id, driver_id;
    ```
    `on_hold`, `approved` and `paid` settlements are untouched. Under READ COMMITTED a concurrent second call blocks on the row locks, re-evaluates `status = 'ready'` after the first commits and updates nothing, so no settlement is approved, audited or announced twice.
-5. For **each** returned row, in the same transaction:
-   - `AuditService.record(tx, ctx, { action: 'SETTLEMENT_APPROVED', entityType: 'settlement', entityId: id, entityLabel: '<driver name> · <periodStart>', previous: { status: 'ready' }, next: { status: 'approved', approvedAt, approvedByUserId }, occurredAt: now })`;
-   - `EventsService.emit(tx, ctx, { type: 'SettlementApproved', aggregateType: 'settlement', aggregateId: id, payload: { settlementId, driverId, periodStart } }, now)` ([17](../17-event-architecture.md) §5; no names or money in the payload).
+5. One audit row and one event for **each** returned row, in the same transaction, written as **two multi-row INSERTs** whatever the number of settlements (architecture §38: not 2 × N statements while the approved rows stay locked; unit test `settlements.service.test.ts`):
+   - `AuditService.recordMany(tx, ctx, rows.map(id => ({ action: 'SETTLEMENT_APPROVED', entityType: 'settlement', entityId: id, entityLabel: '<driver name> · <periodStart>', previous: { status: 'ready' }, next: { status: 'approved', approvedAt, approvedByUserId }, occurredAt: now })))`;
+   - `EventsService.emitMany(tx, ctx, rows.map(id => ({ type: 'SettlementApproved', aggregateType: 'settlement', aggregateId: id, payload: { settlementId, driverId, periodStart } })), now)` ([17](../17-event-architecture.md) §5; no names or money in the payload).
 6. Read the period back with the §2 query (`limit 500`, `offset 0`, no `q`) inside the transaction and return it with `meta.approvedNow` = the number of rows updated in step 4.
 
 **Idempotent.** When the period has no `ready` settlement (already approved, or only held/paid rows), the call returns `200` with the unchanged payload, `approvedNow: 0`, and writes **no** audit row and **no** event. This matches Runtruck1, where clicking "Approved" again does nothing.

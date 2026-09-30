@@ -212,6 +212,10 @@ export const events = pgTable(
     publishedAt: timestamp({ withTimezone: true, mode: 'date' }),
     publishAttempts: bigint({ mode: 'number' }).notNull().default(0),
     lastError: text(),
+    // Publisher lease: a worker claims a batch by setting this in a short statement, then
+    // enqueues outside any transaction; other workers skip the row until the lease ends
+    // (docs/17-event-architecture.md §2, migration 0004).
+    claimedUntil: timestamp({ withTimezone: true, mode: 'date' }),
   },
   (t) => [
     index('events_unpublished_idx')

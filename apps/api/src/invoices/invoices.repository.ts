@@ -8,7 +8,8 @@ import { toNumber } from '../common/list/list-query.js';
 // from items and payments on read (03 §1.8, §6.0.7). Every relation, including every
 // joined one, carries the organization predicate.
 
-// Row order per status (billing.md §4.2); fixed strings, never user input.
+// Row order per status (billing.md §4.2); fixed strings, never user input. The paid order
+// reads `lp`, the page row's latest payment (LATEST_PAYMENT).
 const ORDER_BY: Record<InvoiceStatus, SQL> = {
   sent: sql.raw('i.issued_on DESC, i.invoice_number ASC'),
   overdue: sql.raw('i.issued_on ASC, i.invoice_number ASC'),
@@ -86,6 +87,47 @@ const LATEST_PAYMENT = sql`LEFT JOIN LATERAL (SELECT py.* FROM payments py
                      ORDER BY py.received_at DESC, py.id DESC LIMIT 1) lp ON true
   LEFT JOIN factoring_companies fc ON fc.organization_id = lp.organization_id AND fc.id = lp.factoring_company_id`;
 
+// The ids of one page of invoices of `status`, in list order, chosen before any row is
+// decorated with totals, its first item's load and its latest payment (billing.md §4.7), so a
+// page costs the same whatever the organization's history. Returns the CTE `page (id)`.
+function pageIds(organizationId: string, status: InvoiceStatus, limit: number, offset: number): SQL {
+  if (status !== 'paid') {
+    return sql`page AS MATERIALIZED (
+        SELECT i.id FROM invoices i
+        WHERE i.organization_id = ${organizationId} AND i.status = ${status}
+        ORDER BY ${ORDER_BY[status]}
+        LIMIT ${limit} OFFSET ${offset})`;
+  }
+  // `paid` is the terminal status, so it grows with the whole history. Walk the payments
+  // newest first (payments_org_received_idx, backward), keep each paid invoice's latest one
+  // (no later payment of the same invoice by received_at, id), and stop after offset + limit;
+  // paid invoices without any payment sort last (NULLS LAST, then invoice_number) and are
+  // only read when the payments run out before the page is full (a one-time filter).
+  const needed = offset + limit;
+  return sql`head AS MATERIALIZED (
+        SELECT i.id, py.received_at, i.invoice_number
+        FROM payments py
+        JOIN invoices i ON i.organization_id = py.organization_id AND i.id = py.invoice_id
+        WHERE py.organization_id = ${organizationId} AND i.status = 'paid'
+          AND NOT EXISTS (SELECT 1 FROM payments later
+                          WHERE later.organization_id = py.organization_id AND later.invoice_id = py.invoice_id
+                            AND (later.received_at, later.id) > (py.received_at, py.id))
+        ORDER BY py.received_at DESC, i.invoice_number ASC
+        LIMIT ${needed}),
+      tail AS (
+        SELECT i.id, NULL::timestamptz AS received_at, i.invoice_number
+        FROM invoices i
+        WHERE i.organization_id = ${organizationId} AND i.status = 'paid'
+          AND (SELECT count(*) FROM head) < ${needed}
+          AND NOT EXISTS (SELECT 1 FROM payments py WHERE py.organization_id = i.organization_id AND py.invoice_id = i.id)
+        ORDER BY i.invoice_number ASC
+        LIMIT ${needed}),
+      page AS MATERIALIZED (
+        SELECT u.id FROM (SELECT * FROM head UNION ALL SELECT * FROM tail) u
+        ORDER BY u.received_at DESC NULLS LAST, u.invoice_number ASC
+        LIMIT ${limit} OFFSET ${offset})`;
+}
+
 export interface ArAgingCounts {
   rowCount: number;
   arAging: ArAging;
@@ -117,14 +159,16 @@ export interface DraftAggregate {
 
 @Injectable()
 export class InvoicesRepository {
-  // Invoices of `status` in the status's list order (billing.md §4.7).
+  // Invoices of `status` in the status's list order (billing.md §4.7): the page's ids first
+  // (pageIds), then totals, first load and latest payment for those rows only.
   async rows(
     db: DbExecutor,
     organizationId: string,
     args: { status: InvoiceStatus; today: string; timezone: string; limit: number; offset: number },
   ): Promise<InvoiceRow[]> {
     const { status, today, timezone } = args;
-    const result = await db.execute<InvoiceDbRow>(sql`SELECT i.id, i.invoice_number, i.customer_id, cu.name AS customer_name, i.status,
+    const result = await db.execute<InvoiceDbRow>(sql`WITH ${pageIds(organizationId, status, args.limit, args.offset)}
+      SELECT i.id, i.invoice_number, i.customer_id, cu.name AS customer_name, i.status,
              i.issued_on::text AS issued_on, i.due_on::text AS due_on,
              ${today}::date - i.issued_on AS age_days, ${today}::date - i.due_on AS days_past_due,
              coalesce(t.total_cents, 0)::bigint AS amount_cents, coalesce(pt.paid_cents, 0)::bigint AS paid_cents,
@@ -134,15 +178,14 @@ export class InvoicesRepository {
              ((lp.received_at AT TIME ZONE ${timezone}::text)::date)::text AS paid_on,
              lp.method, lp.factoring_company_id, fc.name AS factoring_company_name, lp.amount_cents AS payment_cents,
              (lp.received_at AT TIME ZONE ${timezone}::text)::date - i.issued_on AS days_to_pay
-      FROM invoices i
+      FROM page p
+      JOIN invoices i ON i.organization_id = ${organizationId} AND i.id = p.id
       JOIN customers cu ON cu.organization_id = i.organization_id AND cu.id = i.customer_id
       ${TOTALS}
       LEFT JOIN invoice_items it1 ON it1.organization_id = i.organization_id AND it1.invoice_id = i.id AND it1.position = 1
       LEFT JOIN loads l ON l.organization_id = i.organization_id AND l.id = it1.load_id
       ${LATEST_PAYMENT}
-      WHERE i.organization_id = ${organizationId} AND i.status = ${status}
-      ORDER BY ${ORDER_BY[status]}
-      LIMIT ${args.limit} OFFSET ${args.offset}`);
+      ORDER BY ${ORDER_BY[status]}`);
     return result.rows.map(toInvoiceRow);
   }
 
@@ -226,6 +269,10 @@ export class InvoicesRepository {
   }
 
   // Paid KPI figures (billing.md §4.5). `month` is the current org month [start, next).
+  // The figures cover every paid invoice by definition (avgDaysToPay, factoring), so this
+  // reads the paid history once, set-based, with no per-invoice lateral or subquery: each
+  // invoice's latest payment comes from one window pass over the organization's payments,
+  // and the factored total from one join of the factored paid invoices with their items.
   async paidAggregate(db: DbExecutor, organizationId: string, args: { timezone: string; month: { start: string; next: string } }): Promise<PaidAggregate> {
     const { timezone, month } = args;
     const result = await db.execute<{
@@ -237,19 +284,30 @@ export class InvoicesRepository {
       factoring_company_names: string[];
       collected_this_month_cents: string;
     }>(sql`WITH paid AS (
-        SELECT i.id, coalesce(t.total_cents, 0) AS amount_cents, lp.method, fc.name AS factoring_company_name,
+        SELECT i.id, lp.method, fc.name AS factoring_company_name,
                (lp.received_at AT TIME ZONE ${timezone}::text)::date AS paid_on,
                (lp.received_at AT TIME ZONE ${timezone}::text)::date - i.issued_on AS days_to_pay
         FROM invoices i
-        ${TOTALS}
-        ${LATEST_PAYMENT}
+        LEFT JOIN (
+          SELECT py.invoice_id, py.received_at, py.method, py.factoring_company_id,
+                 row_number() OVER (PARTITION BY py.invoice_id ORDER BY py.received_at DESC, py.id DESC) AS rn
+          FROM payments py
+          WHERE py.organization_id = ${organizationId}
+        ) lp ON lp.invoice_id = i.id AND lp.rn = 1
+        LEFT JOIN factoring_companies fc ON fc.organization_id = ${organizationId} AND fc.id = lp.factoring_company_id
         WHERE i.organization_id = ${organizationId} AND i.status = 'paid'
+      ),
+      factored AS (
+        SELECT coalesce(sum(ii.amount_cents), 0) AS cents
+        FROM paid p
+        JOIN invoice_items ii ON ii.organization_id = ${organizationId} AND ii.invoice_id = p.id
+        WHERE p.method = 'factoring'
       )
       SELECT count(*)::int AS row_count,
              (count(*) FILTER (WHERE paid_on >= ${month.start}::date AND paid_on < ${month.next}::date))::int AS paid_this_month_count,
              coalesce(sum(days_to_pay), 0)::bigint AS days_to_pay_sum,
              (count(*) FILTER (WHERE method = 'factoring'))::int AS factored_count,
-             coalesce(sum(amount_cents) FILTER (WHERE method = 'factoring'), 0)::bigint AS factored_cents,
+             (SELECT cents FROM factored)::bigint AS factored_cents,
              coalesce(array_agg(DISTINCT factoring_company_name ORDER BY factoring_company_name)
                         FILTER (WHERE method = 'factoring' AND factoring_company_name IS NOT NULL), '{}')::text[] AS factoring_company_names,
              (SELECT coalesce(sum(py.amount_cents), 0) FROM payments py

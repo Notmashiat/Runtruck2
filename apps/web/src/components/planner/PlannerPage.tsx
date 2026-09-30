@@ -138,6 +138,9 @@ export function PlannerPage() {
   const events = useMemo(() => eventsQuery.data?.data.map(toPlannerEventVm) ?? [], [eventsQuery.data]);
   const categories = useMemo(() => codesQuery.data?.data.map(toPlannerCategory) ?? [], [codesQuery.data]);
   const stopValues = stopValuesQuery.data?.data;
+  // The grid shows the range's final layout: its events, or the page's refusal/error state
+  // (without planner.view the read is never sent and renders like a refusal).
+  const eventsSettled = !canView || eventsQuery.data !== undefined || eventsQuery.error !== null;
   const failure =
     (eventsQuery.data ? null : queryErrorLine(eventsQuery.error)) ??
     (codesQuery.data ? null : queryErrorLine(codesQuery.error)) ??
@@ -505,6 +508,7 @@ export function PlannerPage() {
           time={time}
           today={TODAY}
           failure={failure}
+          settled={eventsSettled}
           onOpenDay={view === 'Week' ? openDay : undefined}
           onCreate={create}
           onSelect={select}
@@ -600,10 +604,11 @@ function TimeGrid({
   time,
   today: TODAY,
   failure,
+  settled,
   onOpenDay,
   onCreate,
   onSelect,
-}: GridProps & { days: Date[]; prefs: Prefs }) {
+}: GridProps & { days: Date[]; prefs: Prefs; settled: boolean }) {
   const rowH = ROW_H[prefs.density];
   const visStart = prefs.dayStart * 60;
   const visEnd = prefs.dayEnd * 60;
@@ -621,9 +626,19 @@ function TimeGrid({
       .map((o) => o.start),
     8 * 60,
   );
+  // Runtruck1 scrolled whenever [firstStart, visStart, rowH, days.length] changed, and it
+  // always rendered a range's final layout at once. Here a range not yet loaded first renders
+  // empty; scrolling then (and letting the browser's scroll anchoring shift the grid when the
+  // "All day" row arrives) would leave it 38–68 px lower than Runtruck1. So the same rule runs
+  // on settled renders only, compared with the last settled one (docs/api/planner.md §7.1).
+  const scrolledFor = useRef<string | null>(null);
   useEffect(() => {
+    if (!settled) return;
+    const key = `${firstStart}|${visStart}|${rowH}|${days.length}`;
+    if (scrolledFor.current === key) return;
+    scrolledFor.current = key;
     scrollRef.current?.scrollTo({ top: Math.max(0, ((firstStart - visStart) / 60) * rowH - 12) });
-  }, [firstStart, visStart, rowH, days.length]);
+  }, [settled, firstStart, visStart, rowH, days.length]);
 
   const clickSlot = (date: string, e: MouseEvent<HTMLDivElement>) => {
     if (e.target !== e.currentTarget) return;

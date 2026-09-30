@@ -15,8 +15,9 @@ export interface ListResult<T, M> {
   meta: M;
 }
 
-// Receivables reads (docs/api/billing.md §3, §5). Each list runs two statements, the
-// page and the summary; the summary ignores q, limit and offset (billing.md §1).
+// Receivables reads (docs/api/billing.md §3, §5). The uninvoiced list reads its page and
+// summary in one statement; batches run two, the page and the summary. The summary ignores
+// q, limit and offset (billing.md §1).
 @Injectable()
 export class BillingService {
   constructor(
@@ -29,10 +30,8 @@ export class BillingService {
   async listUninvoicedLoads(ctx: AuthContext, query: ListUninvoicedLoadsQuery): Promise<ListResult<UninvoicedLoadRow, UninvoicedLoadsMeta>> {
     const today = this.clock.today(ctx.timezone);
     const q = searchText(query.q);
-    const [page, summary] = await Promise.all([
-      this.uninvoiced.rows(this.db, ctx.organizationId, q ? { limit: Q_SCAN_LIMIT, offset: 0 } : query),
-      this.uninvoiced.summary(this.db, ctx.organizationId, today),
-    ]);
+    // One statement for the page and the summary (billing.md §3.3).
+    const { rows: page, summary } = await this.uninvoiced.list(this.db, ctx.organizationId, today, q ? { limit: Q_SCAN_LIMIT, offset: 0 } : query);
     const { rows, total } = q ? searchRows(page, uninvoicedViewRow, q, query.limit, query.offset) : { rows: page, total: summary.loadCount };
     return { rows, meta: { total, limit: query.limit, offset: query.offset, summary } };
   }

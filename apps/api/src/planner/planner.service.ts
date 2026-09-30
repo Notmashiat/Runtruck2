@@ -245,11 +245,10 @@ export class PlannerService {
     if (!hasPermissions(ctx.permissions, ['loads.view'])) {
       return { driver: [], customer: [], truck: [], sampleEvent: await this.firstOfficeEvent(ctx) };
     }
-    const [values, pickup] = await Promise.all([
+    const [values, first] = await Promise.all([
       this.repository.stopValueRows(ctx.organizationId),
-      this.repository.stopEvents(ctx.organizationId, { kind: 'pickup' }, 1),
+      this.repository.firstPickupEvent(ctx.organizationId),
     ]);
-    const first = pickup.rows[0];
     return {
       driver: plannerStopValues(values, 'driver'),
       customer: plannerStopValues(values, 'customer'),

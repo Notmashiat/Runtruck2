@@ -1,5 +1,7 @@
 import type { Metadata } from 'next';
+import { connection } from 'next/server';
 import type { ReactNode } from 'react';
+import { THEME_SCRIPT } from '@/lib/theme-script';
 // Global CSS in Runtruck1's cascade order: industry → app → shell → calendar.
 // Imported once, here, so Next cannot reorder the chunks.
 import '@runtruck/ui/styles/industry.css';
@@ -13,13 +15,14 @@ export const metadata: Metadata = {
   icons: { icon: { url: '/favicon.svg', type: 'image/svg+xml' } },
 };
 
-// Applies a saved dark theme before first paint (Runtruck1 index.html did the same).
-const THEME_SCRIPT = `try{document.documentElement.dataset.theme=localStorage.getItem('runtruck-theme')==='dark'?'dark':'light'}catch(e){document.documentElement.dataset.theme='light'}`;
-
-export default function RootLayout({ children }: { children: ReactNode }) {
+export default async function RootLayout({ children }: { children: ReactNode }) {
+  // Every page is rendered per request, never prerendered: Next.js can put the request's
+  // Content-Security-Policy nonce on its scripts only then (lib/csp.ts, src/proxy.ts).
+  await connection();
   return (
     <html lang="en" data-theme="light" data-scroll-behavior="smooth" suppressHydrationWarning>
       <head>
+        {/* A saved dark theme before first paint; allowed by its hash in the CSP. */}
         <script dangerouslySetInnerHTML={{ __html: THEME_SCRIPT }} />
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="" />

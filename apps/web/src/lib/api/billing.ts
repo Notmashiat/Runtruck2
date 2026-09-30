@@ -33,6 +33,8 @@ export function useUninvoicedCount(): number | undefined {
   const pathname = useCurrentPathname();
   const { can } = useSession();
   const permitted = can('billing.view');
-  const { data } = useApiQuery(uninvoicedLoadsQuery, { enabled: permitted && pathname.toLowerCase() === '/app/accounting/uninvoiced' });
+  // The address bar keeps the URL as typed, trailing slash included (proxy.ts).
+  const onTab = pathname.toLowerCase().replace(/\/$/, '') === '/app/accounting/uninvoiced';
+  const { data } = useApiQuery(uninvoicedLoadsQuery, { enabled: permitted && onTab });
   return permitted ? data?.meta.summary.loadCount : undefined;
 }

@@ -32,13 +32,21 @@ function brandType(brand: string): LoadDocumentMimeType | null {
   return null;
 }
 
-// ISO-BMFF: an `ftyp` box first; its major brand decides, else the first known compatible brand.
+// Largest `ftyp` box accepted. Real ones are a few dozen bytes (size, type, major brand,
+// minor version and a handful of 4-byte compatible brands); the cap keeps a forged box
+// size (e.g. 0xFFFFFFFF) from turning detection into a scan of the whole upload.
+export const MAX_FTYP_BOX_BYTES = 4096;
+
+// ISO-BMFF: an `ftyp` box first, well formed (16 ≤ declared size ≤ MAX_FTYP_BOX_BYTES and
+// within the file); its major brand decides, else the first known compatible brand inside
+// the box. Anything after the box end is never read.
 function isoBmffType(bytes: Buffer): LoadDocumentMimeType | null {
-  if (bytes.length < 12 || bytes.toString('latin1', 4, 8) !== 'ftyp') return null;
+  if (bytes.length < 16 || bytes.toString('latin1', 4, 8) !== 'ftyp') return null;
+  const boxSize = bytes.readUInt32BE(0);
+  if (boxSize < 16 || boxSize > MAX_FTYP_BOX_BYTES || boxSize > bytes.length) return null;
   const major = brandType(bytes.toString('latin1', 8, 12));
   if (major) return major;
-  const boxEnd = Math.min(bytes.readUInt32BE(0), bytes.length);
-  for (let at = 16; at + 4 <= boxEnd; at += 4) {
+  for (let at = 16; at + 4 <= boxSize; at += 4) {
     const compatible = brandType(bytes.toString('latin1', at, at + 4));
     if (compatible) return compatible;
   }

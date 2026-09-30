@@ -141,7 +141,8 @@ export const violations = pgTable(
     tenantKey('violations', t),
     tenantFk('violations_driver_fk', t.organizationId, t.driverId, drivers).onDelete('restrict'),
     tenantFk('violations_truck_fk', t.organizationId, t.truckId, trucks).onDelete('restrict'),
-    index('violations_org_occurred_idx').on(t.organizationId, t.occurredOn.desc()),
+    // The list order `occurred_on DESC, id` exactly (DESC = NULLS FIRST; migration 0004).
+    index('violations_org_occurred_idx').on(t.organizationId, t.occurredOn.desc().nullsFirst(), t.id),
     check('violations_points_ck', sql`${t.severityPoints} >= 0`),
   ],
 );

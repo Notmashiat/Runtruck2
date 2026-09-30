@@ -1,4 +1,5 @@
-import { expect, type Page, test } from '@playwright/test';
+import type { Page } from '@playwright/test';
+import { expect, test } from './fixtures.js';
 import { resetDemoData } from '../demo-data.js';
 import { field, signIn } from './helpers.js';
 
@@ -110,6 +111,65 @@ test.describe('Planner', () => {
     await page.reload();
     await expect(legend).toHaveCount(6);
     await expect(legend.filter({ hasText: 'E2E hauling' })).toHaveCount(0);
+  });
+
+  // Runtruck1 opens each range on its first event, or on the working morning: 8 AM sits just
+  // under the header (scrollTop 100 at the default density), with the range's "All day" row
+  // already in place. A range that is still loading must not shift that (docs/api/planner.md §7.1).
+  test('opens a newly loaded range on the working morning, as Runtruck1 does', async ({ page }) => {
+    await openPlanner(page);
+    const scrollTop = () => page.locator('.cal-scroll').evaluate((el) => el.scrollTop);
+
+    await page.getByRole('button', { name: 'Next week' }).click();
+    await expect(page.getByText('Mon, Sep 7 – Sun, Sep 13')).toBeVisible();
+    await expect(page.locator('.cal-allday')).toBeVisible();
+    await expect.poll(scrollTop).toBe(100);
+
+    // A reload with a saved Day view.
+    await page.evaluate(() => {
+      localStorage.setItem('runtruck-planner-prefs', JSON.stringify({ view: 'Day' }));
+    });
+    await page.reload();
+    await expect(page.getByText('Thursday, September 3, 2026')).toBeVisible();
+    await expect(page.locator('.cal-allday')).toBeVisible();
+    await expect(page.locator('.cal-ev', { hasText: 'Dispatch standup' })).toBeVisible();
+    await expect.poll(scrollTop).toBe(100);
+  });
+
+  // View preferences stay in the browser as in Runtruck1 (D8): an open Planner keeps its own
+  // and writes all of them on a change; a Planner that mounts reads what is stored then.
+  test('an open Planner keeps its own view preferences, as in Runtruck1', async ({ page, context }) => {
+    await openPlanner(page);
+    const other = await context.newPage();
+    await other.goto('/app/planner');
+    await expect(other.getByText('Mon, Aug 31 – Sun, Sep 6')).toBeVisible();
+    const chip = (p: Page, label: string) => p.locator('.cal-legend .cal-legend-item', { hasText: label });
+    const stored = async (p: Page): Promise<unknown> =>
+      JSON.parse((await p.evaluate(() => localStorage.getItem('runtruck-planner-prefs'))) ?? 'null');
+
+    await page.getByRole('group', { name: 'View' }).getByRole('button', { name: 'Month', exact: true }).click();
+    await chip(page, 'Meetings').click();
+    await expect(chip(page, 'Meetings')).toHaveAttribute('aria-pressed', 'false');
+
+    // The other tab still shows its own Week with nothing hidden, and its next change
+    // stores its whole state.
+    await chip(other, 'Maintenance').click();
+    await expect(chip(other, 'Maintenance')).toHaveAttribute('aria-pressed', 'false');
+    await expect(other.getByText('Mon, Aug 31 – Sun, Sep 6')).toBeVisible();
+    await expect(chip(other, 'Meetings')).toHaveAttribute('aria-pressed', 'true');
+    await expect.poll(() => stored(other)).toMatchObject({ view: 'Week', hidden: ['maintenance'] });
+
+    // The first tab keeps its Month until its Planner mounts again, which reads the store.
+    await expect(chip(page, 'Maintenance')).toHaveAttribute('aria-pressed', 'true');
+    // Leave the Planner for good (the Dashboard rendered) before coming back, so it unmounts.
+    await page.locator('.ui-nav').getByRole('link', { name: 'Dashboard', exact: true }).click();
+    await expect(page).toHaveURL(/\/app\/dashboard$/);
+    await expect(page.locator('.ui-kpi').first()).toBeVisible();
+    await page.locator('.ui-nav').getByRole('link', { name: 'Planner', exact: true }).click();
+    await expect(page).toHaveURL(/\/app\/planner$/);
+    await expect(page.getByText('Mon, Aug 31 – Sun, Sep 6')).toBeVisible();
+    await expect(chip(page, 'Maintenance')).toHaveAttribute('aria-pressed', 'false');
+    await expect(chip(page, 'Meetings')).toHaveAttribute('aria-pressed', 'true');
   });
 
   test('"Reset calendar" restores the default events', async ({ page }) => {

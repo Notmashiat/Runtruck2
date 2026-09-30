@@ -1,37 +1,64 @@
 'use client';
 
-import { type Dispatch, type SetStateAction, useCallback, useSyncExternalStore } from 'react';
+import { type Dispatch, type SetStateAction, useCallback, useState, useSyncExternalStore } from 'react';
 
 // Runtruck1 lib/persist.ts `usePersisted`, for per-device VIEW PREFERENCES only (the Planner's
 // `runtruck-planner-prefs`, docs/01 D8): business data lives in the API (architecture Rule 1).
 //
-// Runtruck1 read localStorage in the useState initializer, which would make the first client
-// render differ from the server's (a hydration mismatch, port spec §14.3). Here the value is an
-// external store: the server and the hydration render use `fallback`, and React re-renders with
-// the stored value right after hydration. Writes go to localStorage (errors swallowed) and to
-// an in-memory copy, so the page keeps working when storage is blocked, as in Runtruck1.
+// Runtruck1's semantics: each mounted hook reads localStorage ONCE, then keeps the value in its
+// own state and writes every change back. Another tab's writes never change an open screen;
+// they show on its next mount. When storage is blocked the value lives in that mounted hook
+// only (it starts from `fallback` again on the next mount).
+//
+// Runtruck1 read storage in the useState initializer, which would make the first client render
+// differ from the server's (a hydration mismatch, port spec §14.3). So the value sits in a store
+// owned by the hook instance: the server and the hydration render use `fallback`, and React
+// re-renders with the stored value right after hydration. A mount after hydration (client-side
+// navigation) reads storage in its first render, as Runtruck1 did.
 
-interface Entry {
-  raw: string | null;
-  value: unknown;
+export interface InstanceStore<T> {
+  get: () => T;
+  set: (next: T) => void;
+  subscribe: (listener: () => void) => () => void;
 }
 
-const memory = new Map<string, unknown>();
-const cache = new Map<string, Entry>();
-const listeners = new Map<string, Set<() => void>>();
-
-function readRaw(key: string): string | null {
-  try {
-    return localStorage.getItem(key);
-  } catch {
-    return null;
-  }
-}
-
-function notify(key: string): void {
-  listeners.get(key)?.forEach((listener) => {
-    listener();
-  });
+export function createInstanceStore<T>(key: string, fallback: T, revive: (raw: unknown) => T | null): InstanceStore<T> {
+  let read = false;
+  let value = fallback;
+  const listeners = new Set<() => void>();
+  const get = (): T => {
+    if (!read) {
+      read = true;
+      try {
+        const raw = localStorage.getItem(key);
+        value = raw === null ? fallback : (revive(JSON.parse(raw)) ?? fallback);
+      } catch {
+        value = fallback;
+      }
+    }
+    return value;
+  };
+  return {
+    get,
+    set: (next) => {
+      read = true;
+      value = next;
+      try {
+        localStorage.setItem(key, JSON.stringify(next));
+      } catch {
+        // Storage full or blocked: keep working in memory.
+      }
+      listeners.forEach((listener) => {
+        listener();
+      });
+    },
+    subscribe: (listener) => {
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
+    },
+  };
 }
 
 export function usePersisted<T>(
@@ -39,58 +66,17 @@ export function usePersisted<T>(
   fallback: T,
   revive: (raw: unknown) => T | null = (raw) => raw as T,
 ): readonly [T, Dispatch<SetStateAction<T>>] {
-  // `fallback` and `revive` should be stable (module constants), as in Runtruck1's callers.
-  const subscribe = useCallback(
-    (listener: () => void) => {
-      const set = listeners.get(key) ?? new Set();
-      set.add(listener);
-      listeners.set(key, set);
-      const onStorage = (e: StorageEvent) => {
-        if (e.key === key) listener();
-      };
-      window.addEventListener('storage', onStorage);
-      return () => {
-        set.delete(listener);
-        window.removeEventListener('storage', onStorage);
-      };
-    },
-    [key],
-  );
-
-  const getSnapshot = useCallback((): T => {
-    if (memory.has(key)) return memory.get(key) as T;
-    const raw = readRaw(key);
-    const hit = cache.get(key);
-    if (hit && hit.raw === raw) return hit.value as T;
-    let value: T = fallback;
-    if (raw !== null) {
-      try {
-        value = revive(JSON.parse(raw)) ?? fallback;
-      } catch {
-        value = fallback;
-      }
-    }
-    cache.set(key, { raw, value });
-    return value;
-  }, [key, fallback, revive]);
-
+  // `key`, `fallback` and `revive` are read once per mount (module constants in every caller).
+  const [store] = useState(() => createInstanceStore(key, fallback, revive));
   const getServerSnapshot = useCallback((): T => fallback, [fallback]);
-
-  const value = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
+  const value = useSyncExternalStore(store.subscribe, store.get, getServerSnapshot);
 
   const setValue = useCallback<Dispatch<SetStateAction<T>>>(
     (action) => {
-      const current = getSnapshot();
-      const next = typeof action === 'function' ? (action as (prev: T) => T)(current) : action;
-      memory.set(key, next);
-      try {
-        localStorage.setItem(key, JSON.stringify(next));
-      } catch {
-        // Storage full or blocked: keep working in memory.
-      }
-      notify(key);
+      const current = store.get();
+      store.set(typeof action === 'function' ? (action as (prev: T) => T)(current) : action);
     },
-    [key, getSnapshot],
+    [store],
   );
 
   return [value, setValue] as const;

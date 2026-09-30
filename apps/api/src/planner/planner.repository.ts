@@ -200,10 +200,30 @@ export class PlannerRepository {
     return { rows: rows.map(({ total: _t, ...row }) => row), total: rows[0]?.total ?? 0 };
   }
 
+  // §3.9 Event-cards sample: the first pickup stop event in §2.5 order. A plain ORDER BY …
+  // LIMIT 1 (no window count): board loads in loads_org_board_idx order, each load's stops
+  // by sequence, so it reads the first board loads only.
+  async firstPickupEvent(organizationId: string): Promise<StopEventRow | null> {
+    const query = this.db.select(stopColumns).from(loadStops).$dynamic();
+    const [row] = await withStopJoins(query)
+      .where(this.stopWhere(organizationId, { kind: 'pickup' }))
+      .orderBy(...stopOrder)
+      .limit(1);
+    return row ?? null;
+  }
+
   // §3.9: the distinct (driver, customer, truck) labels over every board-load stop event.
+  // The three labels belong to the load (its customer and live dispatch), not to the stop, so
+  // this reads one row per board load that has a pickup or delivery stop event (EXISTS over
+  // its own stops, with the locked code the §2.4 join requires), never every stop.
   async stopValueRows(organizationId: string): Promise<{ driver: string; customer: string; truck: string }[]> {
-    const query = this.db.selectDistinct({ driver: stopDriver, customer: customers.name, truck: stopTruck }).from(loadStops).$dynamic();
-    return withStopJoins(query).where(this.stopWhere(organizationId, {}));
+    const hasStopEvent = sql`exists (select 1 from ${loadStops}
+      join ${codes} on ${codes.organizationId} = ${loadStops.organizationId} and ${codes.key} = ${loadStops.kind}::text
+      where ${loadStops.organizationId} = ${loads.organizationId} and ${loadStops.loadId} = ${loads.id}
+        and ${loadStops.kind} in ('pickup', 'delivery'))`;
+    return withLoadLabelJoins(
+      this.db.selectDistinct({ driver: stopDriver, customer: customers.name, truck: stopTruck }).from(loads).$dynamic(),
+    ).where(and(eq(loads.organizationId, organizationId), isNull(loads.archivedAt), hasStopEvent));
   }
 
   private stopEventQuery(organizationId: string, filter: StopEventFilter) {
@@ -299,7 +319,14 @@ export class PlannerRepository {
   }
 
   // Every code of the organization in list order, row-locked (§3.6, §3.8 step 1, §3.11 step 1).
+  // It first takes the organization's color-code-set lock, a transaction-scoped advisory
+  // lock, so create, delete and reset run one at a time per organization. Row locks alone
+  // do not serialize them: under READ COMMITTED a waiting `SELECT … FOR UPDATE` re-checks
+  // only the rows of its own snapshot and never sees a code a concurrent add inserted, so
+  // the 100-code limit, max(position) + 1 and the first unused tone would read stale data.
+  // The SELECT below is a new statement, so after the lock it sees every committed code.
   async colorCodesForUpdate(tx: DbExecutor, organizationId: string): Promise<LockedColorCode[]> {
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`planner_color_codes:${organizationId}`}, 0))`);
     return tx
       .select({ id: codes.id, key: codes.key, label: codes.label, tone: codes.tone, isLocked: codes.isLocked, position: codes.position })
       .from(codes)
@@ -361,16 +388,22 @@ export class PlannerRepository {
 
   // ─── related loads (§3.10) ────────────────────────────────────────────────────────────
 
-  // Board loads in board order (partial index loads_org_board_idx).
+  // Board loads in board order: the page is a range scan of the partial index
+  // loads_org_board_idx that stops at OFFSET + LIMIT; the total is a separate count(*) of
+  // board loads (index-only on loads_org_board_status_idx) instead of a window over them all.
   async boardLoads(organizationId: string, limit: number, offset: number): Promise<Page<{ id: string; loadNumber: number }>> {
-    const rows = await this.db
-      .select({ id: loads.id, loadNumber: loads.loadNumber, total })
-      .from(loads)
-      .where(and(eq(loads.organizationId, organizationId), isNull(loads.archivedAt)))
-      .orderBy(desc(loads.createdAt), desc(loads.loadNumber))
-      .limit(limit)
-      .offset(offset);
-    return { rows: rows.map(({ total: _t, ...row }) => row), total: rows[0]?.total ?? 0 };
+    const board = and(eq(loads.organizationId, organizationId), isNull(loads.archivedAt));
+    const [rows, [counted]] = await Promise.all([
+      this.db
+        .select({ id: loads.id, loadNumber: loads.loadNumber })
+        .from(loads)
+        .where(board)
+        .orderBy(desc(loads.createdAt), desc(loads.loadNumber))
+        .limit(limit)
+        .offset(offset),
+      this.db.select({ n: count() }).from(loads).where(board),
+    ]);
+    return { rows, total: counted?.n ?? 0 };
   }
 }
 
@@ -396,6 +429,20 @@ const storedColumns = {
   people: events.people,
   loadId: events.loadId,
 };
+
+// The load's labels: its customer and its live dispatch's driver, truck and trailer.
+function withLoadLabelJoins<T extends PgSelect>(query: T) {
+  return query
+    .innerJoin(customers, and(eq(customers.organizationId, loads.organizationId), eq(customers.id, loads.customerId)))
+    .leftJoin(
+      dispatches,
+      and(eq(dispatches.organizationId, loads.organizationId), eq(dispatches.loadId, loads.id), ne(dispatches.status, 'cancelled')),
+    )
+    .leftJoin(drivers, and(eq(drivers.organizationId, dispatches.organizationId), eq(drivers.id, dispatches.driverId)))
+    .leftJoin(employees, and(eq(employees.organizationId, drivers.organizationId), eq(employees.id, drivers.employeeId)))
+    .leftJoin(trucks, and(eq(trucks.organizationId, dispatches.organizationId), eq(trucks.id, dispatches.truckId)))
+    .leftJoin(trailers, and(eq(trailers.organizationId, dispatches.organizationId), eq(trailers.id, dispatches.trailerId)));
+}
 
 // The §2.4 join: board loads only, the locked pickup/delivery code, the live dispatch.
 function withStopJoins<T extends PgSelect>(query: T) {

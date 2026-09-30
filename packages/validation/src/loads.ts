@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { businessDateSchema, pageQuerySchema, timeOfDaySchema } from './common.js';
+import { businessDateSchema, pageQuerySchema, storableTextSchema, timeOfDaySchema } from './common.js';
 
 // Load inputs: the Loads board query, load lookups and the New Load body.
 // Specified in docs/api/loads.md; the value lists mirror the Postgres enums of
@@ -109,10 +109,9 @@ export type LoadIdParam = z.output<typeof loadIdParamSchema>;
 // Runtruck1's order and with its exact messages, so the web can render the Review list and
 // the section badges from the same schema the API enforces (newLoadIssueSection).
 
-// Optional free text: trimmed; empty → null.
+// Optional free text: storable (no NUL, well-formed), trimmed; empty → null.
 function text(label: string, max: number) {
-  return z
-    .string()
+  return storableTextSchema()
     .trim()
     .max(max, `${label} is too long (at most ${max} characters).`)
     .nullish()
@@ -166,8 +165,7 @@ export const createLoadStopSchema = z.object({
   addressLine1: text('Street address', 200),
   city: text('City', 100),
   // Runtruck1 stores the state upper-cased (toLoad place()).
-  state: z
-    .string()
+  state: storableTextSchema()
     .trim()
     .toUpperCase()
     .max(2, 'Use the two-letter state.')
@@ -204,7 +202,8 @@ export const createLoadLtlSchema = z.object({
 export type CreateLoadLtlInput = z.input<typeof createLoadLtlSchema>;
 
 // Carrier + Driver & equipment: own fleet (references) or a partner carrier (free text).
-const ownFleetHaulSchema = z.object({
+// Each kind takes only its own fields (09 §3.1 E3); see withoutForeignHaulFields.
+const ownFleetHaulSchema = z.strictObject({
   hauledBy: z.literal('own_fleet'),
   driverId: optionalRef(),
   truckId: optionalRef(),
@@ -213,7 +212,7 @@ const ownFleetHaulSchema = z.object({
   driverPayCents: optionalCents('Driver pay'),
 });
 
-const partnerCarrierHaulSchema = z.object({
+const partnerCarrierHaulSchema = z.strictObject({
   hauledBy: z.literal('partner_carrier'),
   carrierId: optionalRef(),
   carrierRateCents: optionalCents('Carrier rate'),
@@ -224,11 +223,45 @@ const partnerCarrierHaulSchema = z.object({
   trailerNumber: text('Trailer #', 40),
 });
 
-export const createLoadHaulSchema = z.discriminatedUnion('hauledBy', [ownFleetHaulSchema, partnerCarrierHaulSchema], {
+const haulUnionSchema = z.discriminatedUnion('hauledBy', [ownFleetHaulSchema, partnerCarrierHaulSchema], {
   error: 'Choose Own fleet or Partner carrier.',
 });
 
-export type CreateLoadHaulInput = z.input<typeof createLoadHaulSchema>;
+export type CreateLoadHaulInput = z.input<typeof haulUnionSchema>;
+
+const HAUL_KINDS = {
+  own_fleet: { label: 'own-fleet', fields: new Set(Object.keys(ownFleetHaulSchema.shape)) },
+  partner_carrier: { label: 'partner-carrier', fields: new Set(Object.keys(partnerCarrierHaulSchema.shape)) },
+} as const;
+
+// 09 §3.1 E3: own fleet means references only (no free text, no carrier rate); a partner
+// carrier means free text only (no references, no driver pay). A field of the other kind,
+// or one of neither, is a 400 issue at haul.<field> naming the kind it belongs to, never
+// silently dropped (which would create a different load than the one asked for). The
+// issues do not abort, so Runtruck1's rules below still run; the strict variants are the
+// backstop. The parameter is typed as the input so the body type stays precise; at run
+// time it may be anything, which the union then refuses.
+function withoutForeignHaulFields(input: CreateLoadHaulInput, ctx: z.RefinementCtx): CreateLoadHaulInput {
+  const haul: unknown = input;
+  if (typeof haul !== 'object' || haul === null || !('hauledBy' in haul)) return input;
+  const kind = haul.hauledBy;
+  if (kind !== 'own_fleet' && kind !== 'partner_carrier') return input;
+  const other = kind === 'own_fleet' ? 'partner_carrier' : 'own_fleet';
+  const kept: Record<string, unknown> = {};
+  for (const [field, value] of Object.entries(haul)) {
+    if (HAUL_KINDS[kind].fields.has(field)) {
+      kept[field] = value;
+    } else {
+      const message = HAUL_KINDS[other].fields.has(field)
+        ? `This field is for ${HAUL_KINDS[other].label} loads, not ${HAUL_KINDS[kind].label} loads.`
+        : 'This field is not part of a haul.';
+      ctx.addIssue({ code: 'custom', path: [field], message, input: value, continue: true });
+    }
+  }
+  return kept as CreateLoadHaulInput;
+}
+
+export const createLoadHaulSchema = z.preprocess(withoutForeignHaulFields, haulUnionSchema);
 
 const createLoadShape = z.object({
   // Load info

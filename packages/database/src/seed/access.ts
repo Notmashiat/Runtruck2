@@ -19,8 +19,12 @@ export interface NewOrganization {
   shortName: string;
   companyNumber: string;
   timezone: string;
+  // Digits only ("812044"); the web renders "MC " + digits (docs/03-database.md §2.1).
   mcNumber?: string;
   dotNumber?: string;
+  // The calendar Reset restores (§5.12.2); defaults to 'standard'. Only the demo seed sets
+  // 'runtruck1_demo'.
+  plannerDefaults?: 'standard' | 'runtruck1_demo';
 }
 
 // Creates the organization and a copy of every default role (with permissions).

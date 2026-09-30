@@ -78,3 +78,19 @@ describe('human numbers', () => {
     expect(parseLoadNumber('40218')).toBeNull();
   });
 });
+
+describe('weekday and pay basis', () => {
+  it('labels business dates with their weekday (2026-09-03 is a Thursday)', async () => {
+    const { formatWeekdayShort } = await import('./format.js');
+    expect(['2026-08-27', '2026-08-31', '2026-09-02', '2026-09-03'].map(formatWeekdayShort)).toEqual(['Thu', 'Mon', 'Wed', 'Thu']);
+  });
+
+  it('formats every pay basis like Runtruck1', async () => {
+    const { formatPayBasis } = await import('./format.js');
+    expect(formatPayBasis('per_mile', 62, null)).toBe('$0.62 / mi');
+    expect(formatPayBasis('per_mile', 118, null)).toBe('$1.18 / mi');
+    expect(formatPayBasis('percent_of_line_haul', null, 2500)).toBe('25% of line haul');
+    expect(formatPayBasis('annual_salary', 6_800_000, null)).toBe('$68,000 / yr');
+    expect(formatPayBasis('hourly', 3450, null)).toBe('$34.50 / hr');
+  });
+});

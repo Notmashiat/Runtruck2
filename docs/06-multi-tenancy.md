@@ -65,7 +65,7 @@ The test fixtures, not the demo seed, create a **second organization, "Test Carr
 | An `organizationId` field in a body or query                                   | Ignored or rejected by the Zod schema. It never changes which tenant is used.                           |
 | Audit and outbox rows written by a request                                     | Carry the caller's `organization_id`.                                                                   |
 
-**Status:** the integration test harness (`apps/api/test/`) does not exist yet, so no isolation test runs today. The unit tests cover the guards only (`permissions.guard.test.ts`).
+**Status:** the integration test harness exists (`apps/api/test/`: `global-setup.ts` rebuilds the test database from the migrations; `helpers.ts` seeds the fixtures with `seedTestFixtures` and signs in fixture users). `seed.int.test.ts` proves that Test Carrier Co has at least one row in every tenant-owned table, that its rows stay separate and that the composite tenant keys refuse a cross-tenant reference; `auth.int.test.ts` covers sessions and the guards. The per-endpoint isolation cases of the table above are written with each domain module, as its endpoints land.
 
 ## 5. What is not built
 

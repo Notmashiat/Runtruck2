@@ -22,7 +22,10 @@
       "import": "./dist/testing/index.js"
     }
   },
-  "files": ["dist", "drizzle"],
+  "files": [
+    "dist",
+    "drizzle"
+  ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "dev": "tsc -p tsconfig.build.json --watch --preserveWatchOutput",
@@ -35,6 +38,7 @@
     "db:reset": "node --env-file-if-exists=../../.env dist/scripts/reset.js"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1143.0",
     "@runtruck/calculations": "workspace:*",
     "@runtruck/config": "workspace:*",
     "@runtruck/permissions": "workspace:*",

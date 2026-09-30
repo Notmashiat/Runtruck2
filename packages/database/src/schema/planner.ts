@@ -67,5 +67,7 @@ export const plannerEvents = pgTable(
         or (${t.startTime} is not null and ${t.endTime} is not null and ${t.endTime} > ${t.startTime} and ${t.endDate} is null)`,
     ),
     check('planner_events_end_date_ck', sql`${t.endDate} is null or ${t.endDate} > ${t.startDate}`),
+    // An all-day event spans at most 366 days (the range query's lower bound, 03 §5.12.2).
+    check('planner_events_span_ck', sql`${t.endDate} is null or ${t.endDate} - ${t.startDate} <= 366`),
   ],
 );

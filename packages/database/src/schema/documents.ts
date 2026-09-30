@@ -53,7 +53,8 @@ export const documentVersions = pgTable(
     versionNumber: integer().notNull(),
     // The name the user uploaded ("rate-con-40223.pdf").
     fileName: text().notNull(),
-    // Object key in the documents bucket: org/{organization_id}/documents/{document_id}/v{version_number}.
+    // Object key in the documents bucket: org/{organization_id}/loads/{load_id}/documents/{version id}
+    // (known before the upload transaction, docs/13-document-system.md §4.4).
     storageKey: text().notNull(),
     mimeType: text().notNull(),
     sizeBytes: bigint({ mode: 'number' }).notNull(),

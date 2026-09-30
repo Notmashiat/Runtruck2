@@ -59,7 +59,11 @@ This brief is binding for everyone implementing a domain group. Read it after [d
 - **Search parity:** map each DTO row to a *view-model row* with the same keys and **formatted string values** as Runtruck1's mock object for that row, then filter with `matchesQuery(viewRow, query)` from `src/lib/search.ts`. Search then behaves exactly like Runtruck1, including hidden fields.
 - **Formatting:** use `@runtruck/calculations` (`formatMoney`, `formatShortDate`, `formatDate`, `formatAge`, `formatHos`, `formatActivityTime`, `formatLoadNumber`, …). Never compute authoritative money on the client. KPI values come from the API's `meta.summary`.
 - **Client components** (`'use client'`) are any that use hooks. Read `localStorage` only in effects or event handlers, never during render (hydration).
-- **While data loads,** render the same page structure with no rows. Don't invent spinners or skeletons Runtruck1 never had. On error, render the page with a `ui-empty` row showing the API error message.
+- **Loading, refusal and error states** (the one rule for every ported page; the domain documents reference it and do not restate a different one; 01 §6):
+  1. **First paint has the data.** The server page prefetches the screen's queries for the calls the member is permitted to make and hydrates them (TanStack Query `initialData` / `HydrationBoundary`), so in normal use no Runtruck1 screen shows a loading state. Data a layout-level component needs (the Header's "Invoice N loads") is hydrated above that component.
+  2. **Pending** (a query without prefetched data, e.g. after client navigation): render the page's full structure (tab bar, header, KPI cards, card titles, table head) with KPI values "—" and no notes, no rows, no chart bars and **no** empty-state line. No spinners or skeletons Runtruck1 never had. A refetch keeps the previous data on screen.
+  3. **Refused (403)**: exactly as pending. Nothing about the refused data is shown, and no message is added (the sidebar already hides most refused screens; 07 §5, §7).
+  4. **Any other error** (400, 404, 5xx, network): the structure of rule 2 plus one `ui-empty` line with the API error `message` (user-safe by 04 §2), in the table card, or in the first card of a page without a table.
 - **Header contracts** (Header.tsx already imports these):
   - `useUninvoicedCount(): number | undefined` from `@/lib/api/billing`
   - `useApproveSettlements(): () => void` from `@/lib/api/settlements`

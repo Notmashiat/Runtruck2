@@ -5,6 +5,12 @@ import { id, timestamps } from './_columns.js';
 // Platform tables: tenants, identity, sessions, access control, audit and the
 // domain-event outbox. Specified in docs/03-database.md §2.
 
+// Which calendar "Reset calendar" restores for an organization (D8, docs/03-database.md §2.1,
+// §5.12.2): 'standard' = the six default color codes and no events; 'runtruck1_demo' = those
+// codes plus Runtruck1's demo events (§7.25), set only by the demo seed. Tenant-specific
+// demo content never reaches another organization.
+export const plannerDefaultSet = pgEnum('planner_default_set', ['standard', 'runtruck1_demo']);
+
 export const organizations = pgTable(
   'organizations',
   {
@@ -19,6 +25,7 @@ export const organizations = pgTable(
     // The organization's own operating authority (own-fleet loads are hauled under it).
     mcNumber: text(),
     dotNumber: text(),
+    plannerDefaults: plannerDefaultSet().notNull().default('standard'),
     ...timestamps(),
   },
   (t) => [uniqueIndex('organizations_company_number_uq').on(t.companyNumber)],

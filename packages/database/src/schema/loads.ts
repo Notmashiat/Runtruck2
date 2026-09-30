@@ -165,6 +165,8 @@ export const loads = pgTable(
         and (${t.declaredValueCents} is null or ${t.declaredValueCents} >= 0)
         and (${t.operatingCostCents} is null or ${t.operatingCostCents} >= 0)`,
     ),
+    // "Total to customer" fits an integer, so revenue(l) never overflows int4 (03 §5.6.1).
+    check('loads_total_ck', sql`${t.lineHaulCents}::bigint + ${t.fuelSurchargeCents} + ${t.accessorialCents} <= 2147483647`),
     check(
       'loads_pay_ck',
       sql`(${t.driverPayCents} is null or ${t.driverPayCents} > 0)
@@ -232,6 +234,10 @@ export const loadStops = pgTable(
     tenantFk('load_stops_facility_fk', t.organizationId, t.facilityId, facilities).onDelete('restrict'),
     uniqueIndex('load_stops_load_sequence_uq').on(t.organizationId, t.loadId, t.sequence),
     index('load_stops_org_date_idx').on(t.organizationId, t.appointmentDate),
+    // Stops completed in a date window (Dashboard revenue by delivery day, docs/api/dashboard.md §2.7).
+    index('load_stops_org_completed_idx')
+      .on(t.organizationId, t.completedAt)
+      .where(sql`${t.completedAt} is not null`),
     check('load_stops_sequence_ck', sql`${t.sequence} >= 1`),
     check('load_stops_place_ck', sql`${t.kind} = 'fuel' or (${t.city} is not null and ${t.state} is not null)`),
     check(

@@ -120,3 +120,26 @@ export function parseLoadNumber(text: string): number | null {
   const match = /^L-(\d{1,9})$/i.exec(text.trim());
   return match?.[1] ? Number(match[1]) : null;
 }
+
+// 'Thu' for 2026-09-03 — the weekday of a business date (Dashboard revenue bars).
+export function formatWeekdayShort(date: string): string {
+  return new Intl.DateTimeFormat('en-US', { weekday: 'short', timeZone: 'UTC' }).format(new Date(`${date}T00:00:00Z`));
+}
+
+export type PayBasis = 'per_mile' | 'percent_of_line_haul' | 'annual_salary' | 'hourly';
+
+// Pay basis label (docs/03-database.md §6.0.6), shared by HR › Contracts and
+// Accounting › Payroll so both read identically: '$0.62 / mi', '25% of line haul',
+// '$68,000 / yr', '$34.50 / hr'.
+export function formatPayBasis(basis: PayBasis, payRateCents: number | null, payPercentBp: number | null): string {
+  switch (basis) {
+    case 'per_mile':
+      return `$${((payRateCents ?? 0) / 100).toFixed(2)} / mi`;
+    case 'percent_of_line_haul':
+      return `${(payPercentBp ?? 0) / 100}% of line haul`;
+    case 'annual_salary':
+      return `${formatMoney(payRateCents ?? 0)} / yr`;
+    case 'hourly':
+      return `$${((payRateCents ?? 0) / 100).toFixed(2)} / hr`;
+  }
+}

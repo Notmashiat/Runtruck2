@@ -75,7 +75,7 @@ Required cases for **every** endpoint:
 | Writes                                                                       | The row, **one `audit_logs` row and one `events` row** exist with the caller's `organization_id`. None exist after a rejected request. |
 | State machines                                                               | An illegal transition gives 409 and changes nothing.                                                                                   |
 
-**Status: not built.** `apps/api/test/` and `test/global-setup.ts` do not exist yet, so `pnpm test:integration` currently fails. The fixtures are specified in design brief §3 and exported from `@runtruck/database/testing`; that entry point is declared in `packages/database/package.json` but its source does not exist yet.
+**Status: built.** `apps/api/test/global-setup.ts` rebuilds `TEST_DATABASE_URL` from the migrations (`0000`–`0003`); `helpers.ts` (`createTestContext`) truncates, seeds `seedTestFixtures` from `@runtruck/database/testing` and signs in fixture users. Suites: `auth.int.test.ts` (sessions, guards, the append-only audit trigger) and `seed.int.test.ts` (the demo seed and the tenancy fixtures). Each domain module adds its `<domain>.int.test.ts` with the cases above.
 
 ## 4. End-to-end tests
 
@@ -88,7 +88,7 @@ Required cases for **every** endpoint:
   3. Planner: add, edit and delete an event; add, rename and delete a color code; **Reset calendar** restores the defaults.
   4. Payroll: **Approve all** moves the three Ready settlements to Approved. It survives a reload.
   5. Routing: case-insensitive paths, the six legacy redirects, section roots → first tab, unknown path → `/`.
-- **Status: not built.** The `tests/` directory does not exist yet. The root `test:e2e` script already targets `@runtruck/e2e`.
+- **Status: partly built.** `tests/e2e` (`@runtruck/e2e`) runs Playwright against its own database (`E2E_DATABASE_URL`) with the built API, worker and web (`specs/auth.spec.ts`, `specs/shell.spec.ts`); the workflows above are added as their screens land. Known defect: the package names its Playwright script `test`, so `turbo run test` (root `pnpm test`, CI "Unit tests") also starts Playwright, before the apps are built. The script must be renamed `test:e2e` and the root script pointed at it ([19](19-security.md) G9).
 
 ## 5. Parity checks (docs/01 R1)
 
@@ -116,7 +116,7 @@ Architecture §32 order for every pull request:
 
 Production deployment requires every gate to pass.
 
-**Status: not built.** There is no `.github/workflows` directory yet, although CI is in this release's scope (docs/01 §5).
+**Status: built** (`.github/workflows/ci.yml`: every gate above, with PostgreSQL, Redis and SeaweedFS service containers). Open: `pnpm format:check` and a dependency-audit gate are not in the workflow, and the "Unit tests" gate currently runs the e2e suite too (§4).
 
 ## 7. Rules
 

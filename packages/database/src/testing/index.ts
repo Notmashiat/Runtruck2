@@ -2,6 +2,9 @@ import { sql } from 'drizzle-orm';
 import type { Database } from '../client.js';
 import { seedAccess } from '../seed/access.js';
 import { seedDemo, type SeedOptions } from '../seed/index.js';
+import { seedOtherOrganizationData } from './other-organization.js';
+
+export { OTHER_ORG_FIXTURE } from './other-organization.js';
 
 // Test-only helpers (never used by the app). Fixtures add a SECOND organization
 // and role-limited users so integration tests can prove tenant isolation and
@@ -33,7 +36,8 @@ export interface FixtureOrganizations {
   otherOrganizationId: string;
 }
 
-// Demo seed + the second tenant + role-limited users, all with TEST_PASSWORD.
+// Demo seed + the second tenant (with at least one row in every tenant-owned domain
+// table, so tenancy tests can prove isolation) + role-limited users, all with TEST_PASSWORD.
 export async function seedTestFixtures(db: Database, options: Partial<SeedOptions> = {}): Promise<FixtureOrganizations> {
   const demo = await seedDemo(db, { password: TEST_PASSWORD, ...options });
   const access = await seedAccess(db, {
@@ -52,5 +56,6 @@ export async function seedTestFixtures(db: Database, options: Partial<SeedOption
       owner: { email: FIXTURE_USERS.otherAdmin, fullName: 'Olivia Owner', memberNumber: '200000001', title: 'Owner', role: 'owner' },
     },
   });
+  await db.transaction((tx) => seedOtherOrganizationData(tx, access.otherOrganizationId));
   return { demoOrganizationId: demo.organizationId, otherOrganizationId: access.otherOrganizationId };
 }

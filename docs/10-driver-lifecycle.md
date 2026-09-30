@@ -37,11 +37,7 @@ The table and column definitions are in [03-database.md](03-database.md). The en
 ## 3. Drivers as users (Phase 9)
 
 - A **driver record** (fleet data) is not the same thing as a **user account** (someone who signs in). Today no driver has a user account, and no link between the two exists.
-- The default **Driver role** exists (`loads.view`, `documents.view`, `documents.upload`), but it is not usable safely yet:
-  - It is not scoped to the driver's own assigned loads.
-  - `loads.view` includes load financials.
-
-  Both must change before a driver client ships ([07](07-roles-permissions.md) §7).
+- The default **Driver role** exists but grants **no permissions** (`roles.ts`, commit `15094a9`): `loads.view` would expose every load's rates and margins, and nothing scopes a member to the driver's own assigned loads. Phase 9 adds driver-scoped endpoints (assigned loads only, no money) and the permissions they need, before any driver client ships ([07](07-roles-permissions.md) §3, §7).
 
 - The mobile app needs non-cookie authentication (bearer tokens). The API's Origin rule already leaves room for it ([05](05-authentication.md) §6).
 

@@ -12,7 +12,7 @@ services:
       POSTGRES_PASSWORD: runtruck_dev
       POSTGRES_DB: runtruck
     ports:
-      - '5432:5432'
+      - '127.0.0.1:5432:5432'
     volumes:
       - postgres-data:/var/lib/postgresql/data
       - ./postgres-init:/docker-entrypoint-initdb.d:ro
@@ -27,7 +27,7 @@ services:
     restart: unless-stopped
     command: ['redis-server', '--appendonly', 'yes']
     ports:
-      - '6379:6379'
+      - '127.0.0.1:6379:6379'
     volumes:
       - redis-data:/data
     healthcheck:
@@ -44,7 +44,7 @@ services:
     restart: unless-stopped
     command: ['server', '-dir=/data', '-ip.bind=0.0.0.0', '-s3', '-s3.port=8333', '-s3.config=/etc/seaweedfs/s3.json']
     ports:
-      - '9000:8333'
+      - '127.0.0.1:9000:8333'
     volumes:
       - s3-data:/data
       - ./seaweedfs/s3.json:/etc/seaweedfs/s3.json:ro
